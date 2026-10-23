@@ -395,3 +395,10 @@ produce detached text acknowledgements. C4 carriers take a bombsite role in
 splits, commit to a reachable point inside the actual planting zone, and retain
 the native planting task rather than following roaming group leaders. A new
 human site call can redirect the approach before planting begins.
+
+T-side automatic captains favor coordinated all-A, all-B, mid-to-A and mid-to-B
+executes (95% on ordinary buy rounds). Splits are situational: 35% during ecos,
+45% after consecutive losses, and 60% on selected slow rounds. Mid executes
+actually gather the group, including C4, before switching to the called site;
+a 20-second bound prevents a stuck player from stalling the execute. CT plans
+retain defensive site coverage. Human calls still replace automatic plans.

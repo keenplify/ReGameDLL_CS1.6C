@@ -124,6 +124,21 @@ int main()
   auto blocked = contact; blocked.*required = false;
   CHECK(!SightingAllowed(blocked, 100, 0, 0));
  }
+ // Check the distribution across every roll, plus actual staged-execute gates.
+ for(int context=0;context<4;++context) {
+  int splits=0;
+  for(int roll=0;roll<100;++roll)if(chooseAttackPlan(context==1,context==2?2:0,context==3,roll,0)==AttackPlan::Split)++splits;
+  CHECK(splits==(context==0?5:context==1?35:context==2?45:60));
+ }
+ CHECK(chooseAttackPlan(false,0,false,99,0)==AttackPlan::AllA);
+ CHECK(chooseAttackPlan(false,0,false,99,1)==AttackPlan::AllB);
+ CHECK(chooseAttackPlan(false,0,false,99,2)==AttackPlan::MidToA);
+ CHECK(chooseAttackPlan(false,0,false,99,3)==AttackPlan::MidToB);
+ CHECK(!midStageReady(5,5,true,3));
+ CHECK(!midStageReady(5,4,false,8));
+ CHECK(!midStageReady(5,3,true,8));
+ CHECK(midStageReady(5,4,true,8));
+ CHECK(midStageReady(5,0,false,20));
 	if (!failures) std::puts("competitive bot policy tests passed");
 	return failures ? 1 : 0;
 }

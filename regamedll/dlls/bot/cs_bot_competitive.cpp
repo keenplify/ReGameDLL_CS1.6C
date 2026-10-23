@@ -382,7 +382,8 @@ struct CaptainPlan {
  unsigned revision=0, applied[MAX_CLIENTS+1]={};
  int ids[MAX_CLIENTS+1]={};
  TeamOrder roles[MAX_CLIENTS+1]={};
- float ready=0,nextDrive=0;
+ float ready=0,nextDrive=0,stageStarted=0,slowUntil=0;
+ bool staged=false;TeamOrder finish=TeamOrder::None;
 };
 CaptainPlan plans[4];
 unsigned planRevision=0;
@@ -400,10 +401,10 @@ CCSBot *ElectCaptain(TeamName team) {
  }
  return best;
 }
-bool MakePlan(CBasePlayer *leader,bool human,TeamAllocation allocation,TeamOrder single=TeamOrder::None) {
+bool MakePlan(CBasePlayer *leader,bool human,TeamAllocation allocation,TeamOrder single=TeamOrder::None,TeamOrder finish=TeamOrder::None) {
  auto team=leader->m_iTeam;CaptainPlan next;
  next.active=true;next.human=human;next.leaderSlot=leader->entindex();next.leaderId=GETPLAYERUSERID(leader->edict());
- next.revision=++planRevision;
+ next.revision=++planRevision;next.finish=finish;next.staged=finish!=TeamOrder::None;next.stageStarted=gpGlobals->time;
  int humans=0,bots=0;
  for(int i=1;i<=gpGlobals->maxClients;++i) {
   auto *p=Player(i);if(!p || !p->IsAlive() || p->m_iTeam!=team) continue;
@@ -434,6 +435,10 @@ bool MakePlan(CBasePlayer *leader,bool human,TeamAllocation allocation,TeamOrder
   }
   auto *bot=static_cast<CCSBot *>(p);auto *area=Destination(order,bot->pev->origin);
   if(!area && !human) return false;
+  if(finish!=TeamOrder::None) {
+   auto *target=Destination(finish,p->pev->origin);if(!target)return false;
+   ShortestPathCost cost;if(area && NavAreaTravelDistance(area,target,cost)<0)return false;
+  }
   // A human call can fall back to following that human when place labels are absent.
   if(area && bot->GetLastKnownArea()) {
    ShortestPathCost cost;if(NavAreaTravelDistance(bot->GetLastKnownArea(),area,cost)<0) return false;
@@ -443,7 +448,7 @@ bool MakePlan(CBasePlayer *leader,bool human,TeamAllocation allocation,TeamOrder
  // Keep the C4 in a site group; swap roles rather than changing the split counts.
  for(int i=1;i<=gpGlobals->maxClients;++i) {
   auto *p=Player(i);if(!p || !p->IsBot() || !p->IsAlive() || p->m_iTeam!=team || !static_cast<CCSBot *>(p)->IsCarryingBomb())continue;
-  if(next.roles[i]!=TeamOrder::AllMid)continue;
+  if(next.roles[i]!=TeamOrder::AllMid || next.staged)continue;
   int replacement=0;
   for(int j=1;j<=gpGlobals->maxClients;++j)if(next.ids[j] && (next.roles[j]==TeamOrder::GoA || next.roles[j]==TeamOrder::GoB)) {
    if(!replacement || (next.roles[j]==TeamOrder::GoA && allocation.a>=allocation.b))replacement=j;
@@ -489,20 +494,51 @@ void MaintainCaptains() {
    int style=RANDOM_LONG(0,2);TeamAllocation split;
    split.a=(alive*3+4)/5;split.b=style==1?0:alive-split.a;split.mid=alive-split.a-split.b;
    if(style==2 && split.b>1){--split.b;++split.mid;}
-   bool accepted=MakePlan(captain,false,split);
+   bool accepted=false;char line[64]={};
+   bool playingTime=team==TERRORIST && RANDOM_LONG(0,99)<10;
+   if(team==TERRORIST) {
+    int budget=0;for(int i=1;i<=gpGlobals->maxClients;++i){auto *p=Player(i);if(p && p->IsAlive() && p->m_iTeam==team && !p->m_rgpPlayerItems[PRIMARY_WEAPON_SLOT] && p->m_iAccount<=2000)++budget;}
+    bool economical=eco[team] || TeamEco(team) || budget*2>=alive;
+    auto attack=chooseAttackPlan(economical,CSGameRules()->m_iNumConsecutiveTerroristLoses,playingTime,RANDOM_LONG(0,99),RANDOM_LONG(0,3));
+    if(attack!=AttackPlan::Split) {
+     bool a=attack==AttackPlan::AllA || attack==AttackPlan::MidToA;
+     bool mid=attack==AttackPlan::MidToA || attack==AttackPlan::MidToB;
+     auto finish=a?TeamOrder::GoA:TeamOrder::GoB;
+     split=a?TeamAllocation {alive,0,0}:TeamAllocation {0,alive,0};
+     accepted=MakePlan(captain,false,split,mid?TeamOrder::AllMid:finish,mid?finish:TeamOrder::None);
+     if(accepted)Q_snprintf(line,sizeof(line),mid?(a?"all mid to A":"all mid to B"):(a?"all A":"all B"));
+    } else accepted=MakePlan(captain,false,split);
+   } else accepted=MakePlan(captain,false,split);
    if(!accepted) {split={alive,0,0};accepted=MakePlan(captain,false,split);}
    if(!accepted) {split={0,alive,0};accepted=MakePlan(captain,false,split);}
    if(!accepted) {plan.ready=gpGlobals->time+5;continue;}
-   char line[64];formatTeamAllocation(split,line,sizeof(line));
+   if(!line[0])formatTeamAllocation(split,line,sizeof(line));
+   if(playingTime)plan.slowUntil=gpGlobals->time+12;
    AnnouncePlan(captain,line);
    leader=captain;
   }
   if(gpGlobals->time<plan.nextDrive)continue;
   plan.nextDrive=gpGlobals->time+1;
+  if(plan.slowUntil>0 && gpGlobals->time>=plan.slowUntil) {
+   plan.slowUntil=0;
+   for(int slot=1;slot<=gpGlobals->maxClients;++slot){auto *p=Player(slot);if(p && p->IsBot() && p->IsAlive() && p->m_iTeam==team && GETPLAYERUSERID(p->edict())==plan.ids[slot])static_cast<CCSBot *>(p)->Run();}
+  }
+  if(plan.staged) {
+   int members=0,nearby=0;bool bombNearby=true;
+   for(int slot=1;slot<=gpGlobals->maxClients;++slot) {
+    auto *p=Player(slot);if(!p || !p->IsAlive() || !p->IsBot() || p->m_iTeam!=team || GETPLAYERUSERID(p->edict())!=plan.ids[slot])continue;
+    auto *middle=Destination(TeamOrder::AllMid,p->pev->origin);bool near=middle && (*middle->GetCenter()-p->pev->origin).LengthSquared()<400*400;
+    ++members;if(near)++nearby;if(static_cast<CCSBot *>(p)->IsCarryingBomb() && !near)bombNearby=false;
+   }
+   if(midStageReady(members,nearby,bombNearby,gpGlobals->time-plan.stageStarted)) {
+    plan.staged=false;plan.revision=++planRevision;
+    for(int slot=1;slot<=MAX_CLIENTS;++slot)if(plan.ids[slot])plan.roles[slot]=plan.finish;
+   }
+  }
   for(int i=1;i<=gpGlobals->maxClients;++i) {
    auto *p=Player(i);if(!p || !p->IsBot() || p->m_iTeam!=team || GETPLAYERUSERID(p->edict())!=plan.ids[i]) continue;
    auto *bot=static_cast<CCSBot *>(p);
-   if(bot->IsCarryingBomb()) {
+   if(bot->IsCarryingBomb() && (!plan.staged || bot->IsAtBombsite())) {
     if(!bot->IsAlive() || bot->IsAttacking() || bot->IsEnemyVisible() || bot->GetTimeSinceAttacked()<2
        || bot->IsBuying() || IsManagingGrenade(bot))continue;
     if(bot->IsAtBombsite()) {
@@ -523,7 +559,7 @@ void MaintainCaptains() {
     bot->StopFollowing();bot->SetTask(CCSBot::PLANT_BOMB);bot->Run();bot->MoveTo(point,FASTEST_ROUTE);
     plan.applied[i]=plan.revision;continue;
    }
-   if(!PlanMember(bot) || (HasHumanOrder(bot) && !plan.human) || bot->IsAttacking() || bot->IsEnemyVisible() || bot->GetTimeSinceAttacked()<2
+   if((!PlanMember(bot) && !(plan.staged && bot->IsCarryingBomb() && bot->IsAlive())) || (HasHumanOrder(bot) && !plan.human) || bot->IsAttacking() || bot->IsEnemyVisible() || bot->GetTimeSinceAttacked()<2
       || (bot->IsBuying() && bot->CanPlayerBuy(false)) || IsManagingGrenade(bot) || PauseForTyping(bot))continue;
    auto *area=Destination(plan.roles[i],bot->pev->origin);
    if(!area) {if(plan.human && leader && bot!=leader && !bot->IsFollowing())bot->Follow(leader);continue;}
@@ -540,7 +576,9 @@ void MaintainCaptains() {
     if(plan.applied[i]==plan.revision && bot->IsMovingTo())continue;
     if(!bot->GetLastKnownArea())continue;
     ShortestPathCost cost;if(NavAreaTravelDistance(bot->GetLastKnownArea(),area,cost)<0)continue;
-    bot->StopFollowing();bot->SetTask(CCSBot::SEEK_AND_DESTROY);bot->MoveTo(area->GetCenter(),FASTEST_ROUTE);
+    bot->StopFollowing();bot->SetTask(CCSBot::SEEK_AND_DESTROY);
+    if(plan.slowUntil>gpGlobals->time)bot->Walk();else bot->Run();
+    bot->MoveTo(area->GetCenter(),plan.slowUntil>gpGlobals->time?SAFEST_ROUTE:FASTEST_ROUTE);
    }
    plan.applied[i]=plan.revision;
   }

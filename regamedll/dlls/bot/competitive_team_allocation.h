@@ -56,3 +56,19 @@ inline bool formatTeamAllocation(const TeamAllocation &allocation, char *out, st
  }
  return used!=0;
 }
+
+// Full-team attacks dominate ordinary rounds; adaptation makes splits situational.
+enum class AttackPlan { AllA, AllB, MidToA, MidToB, Split };
+inline AttackPlan chooseAttackPlan(bool eco, int consecutiveLosses, bool playingTime, int roll, int route) {
+ int splitChance=playingTime?60:consecutiveLosses>=2?45:eco?35:5;
+ if(roll<splitChance)return AttackPlan::Split;
+ switch(route%4) {
+  case 0:return AttackPlan::AllA;
+  case 1:return AttackPlan::AllB;
+  case 2:return AttackPlan::MidToA;
+  default:return AttackPlan::MidToB;
+ }
+}
+inline bool midStageReady(int members, int nearby, bool bombNearby, float elapsed) {
+ return elapsed>=20 || (elapsed>=4 && members>0 && nearby*3>=members*2 && bombNearby);
+}
