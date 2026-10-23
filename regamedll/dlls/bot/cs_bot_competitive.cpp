@@ -41,6 +41,7 @@ struct Reply {
 	bool active = false;
 	bool teamOnly = false;
 	bool tactical = false;
+	bool planAnnouncement = false;
 	int listenerSlot = 0, subjectSlot = 0;
 	Recipient subject;
 	Recipient speaker, listener;
@@ -439,6 +440,17 @@ bool MakePlan(CBasePlayer *leader,bool human,TeamAllocation allocation,TeamOrder
   }
   next.ids[i]=GETPLAYERUSERID(p->edict());next.roles[i]=order;
  }
+ // Keep the C4 in a site group; swap roles rather than changing the split counts.
+ for(int i=1;i<=gpGlobals->maxClients;++i) {
+  auto *p=Player(i);if(!p || !p->IsBot() || !p->IsAlive() || p->m_iTeam!=team || !static_cast<CCSBot *>(p)->IsCarryingBomb())continue;
+  if(next.roles[i]!=TeamOrder::AllMid)continue;
+  int replacement=0;
+  for(int j=1;j<=gpGlobals->maxClients;++j)if(next.ids[j] && (next.roles[j]==TeamOrder::GoA || next.roles[j]==TeamOrder::GoB)) {
+   if(!replacement || (next.roles[j]==TeamOrder::GoA && allocation.a>=allocation.b))replacement=j;
+  }
+  if(replacement){next.roles[i]=next.roles[replacement];next.roles[replacement]=TeamOrder::AllMid;}
+  else next.roles[i]=allocation.b>allocation.a?TeamOrder::GoB:TeamOrder::GoA;
+ }
  plans[team]=next;return true;
 }
 bool HumanCaptainCall(CBasePlayer *human,const char *text) {
@@ -483,7 +495,6 @@ void MaintainCaptains() {
    if(!accepted) {plan.ready=gpGlobals->time+5;continue;}
    char line[64];formatTeamAllocation(split,line,sizeof(line));
    AnnouncePlan(captain,line);
-   for(int i=1;i<=gpGlobals->maxClients;++i){auto *p=Player(i);if(p && p!=captain && p->IsBot() && p->IsAlive() && p->m_iTeam==team){if(InitiatesChat(static_cast<CCSBot *>(p)))Queue(static_cast<CCSBot *>(p),nullptr,true,"roger",true);else p->Radio("%!MRAD_AFFIRM","#Affirmative");break;}}
    leader=captain;
   }
   if(gpGlobals->time<plan.nextDrive)continue;
@@ -491,6 +502,27 @@ void MaintainCaptains() {
   for(int i=1;i<=gpGlobals->maxClients;++i) {
    auto *p=Player(i);if(!p || !p->IsBot() || p->m_iTeam!=team || GETPLAYERUSERID(p->edict())!=plan.ids[i]) continue;
    auto *bot=static_cast<CCSBot *>(p);
+   if(bot->IsCarryingBomb()) {
+    if(!bot->IsAlive() || bot->IsAttacking() || bot->IsEnemyVisible() || bot->GetTimeSinceAttacked()<2
+       || bot->IsBuying() || IsManagingGrenade(bot))continue;
+    if(bot->IsAtBombsite()) {
+     if(bot->GetTask()!=CCSBot::PLANT_BOMB){bot->StopFollowing();bot->SetTask(CCSBot::PLANT_BOMB);bot->PlantBomb();}
+     continue;
+    }
+    // Once committed, let native planting/path recovery finish without reissuing MoveTo.
+    if(bot->GetTask()==CCSBot::PLANT_BOMB && bot->IsMovingTo()
+       && plan.applied[i]==plan.revision)continue;
+    auto *start=bot->GetLastKnownArea();if(!start)continue;
+    auto *site=Destination(plan.roles[i],bot->pev->origin);
+    ShortestPathCost cost;
+    const auto *zone=TheCSBots()->GetClosestZone(site?site:start,cost);
+    const Vector *point=zone?TheCSBots()->GetRandomPositionInZone(zone):nullptr;
+    if(!point)continue;
+    auto *goal=TheNavAreaGrid.GetNearestNavArea(point);
+    if(!goal || NavAreaTravelDistance(start,goal,cost)<0)continue;
+    bot->StopFollowing();bot->SetTask(CCSBot::PLANT_BOMB);bot->Run();bot->MoveTo(point,FASTEST_ROUTE);
+    plan.applied[i]=plan.revision;continue;
+   }
    if(!PlanMember(bot) || (HasHumanOrder(bot) && !plan.human) || bot->IsAttacking() || bot->IsEnemyVisible() || bot->GetTimeSinceAttacked()<2
       || (bot->IsBuying() && bot->CanPlayerBuy(false)) || IsManagingGrenade(bot) || PauseForTyping(bot))continue;
    auto *area=Destination(plan.roles[i],bot->pev->origin);
@@ -532,7 +564,10 @@ bool InitiatesChat(CCSBot *bot) {
  return role<2;
 }
 bool AnnouncePlan(CCSBot *bot,const char *line) {
- if(InitiatesChat(bot))return Queue(bot,nullptr,true,line,true);
+ if(InitiatesChat(bot)) {
+  if(!Queue(bot,nullptr,true,line,true))return false;
+  State(bot).reply.planAnnouncement=true;return true;
+ }
  bot->Radio("%!MRAD_GO","#Go_go_go");return true;
 }
 bool Speak(CCSBot *bot,CBasePlayer *listener,bool teamOnly,const char *line,bool tactical) {
@@ -881,6 +916,20 @@ void Frame()
 		reply.active = false;
 		SendSayMessage(bot, reply.teamOnly ? "say_team" : "say", reply.teamOnly,
 			reply.text, format, nullptr, !bot->IsAlive(), nullptr, false);
+  // Independent typing delays must not let an acknowledgement overtake its order.
+  if(reply.planAnnouncement && bot->IsAlive() && plans[bot->m_iTeam].active
+     && plans[bot->m_iTeam].leaderId==GETPLAYERUSERID(bot->edict())) {
+   char captainName[64],ack[91];CleanName(bot,captainName);
+   Q_snprintf(ack,sizeof(ack),"roger, %s",captainName);
+   for(int slot=1;slot<=gpGlobals->maxClients;++slot) {
+    auto *member=Player(slot);
+    if(!member || member==bot || !member->IsBot() || !member->IsAlive() || member->m_iTeam!=bot->m_iTeam)continue;
+    auto *teammate=static_cast<CCSBot *>(member);
+    if(!InitiatesChat(teammate) || !Queue(teammate,nullptr,true,ack,true))continue;
+    State(teammate).reply.subjectSlot=bot->entindex();State(teammate).reply.subject=Identity(bot);
+    break;
+   }
+  }
 	}
 }
 

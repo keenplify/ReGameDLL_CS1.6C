@@ -388,3 +388,10 @@ the published file. Native learning remains unchanged. Generated NAVs publish th
 a temporary file and atomic rename, preserving the cache link and preventing readers
 from loading an in-progress file. Map change, completion and process exit release
 generation ownership. Existing NAVs load directly without regeneration.
+
+Captain acknowledgements are queued only after the actual captain chat line is
+delivered and name that captain. Failed or radio-only plan announcements do not
+produce detached text acknowledgements. C4 carriers take a bombsite role in
+splits, commit to a reachable point inside the actual planting zone, and retain
+the native planting task rather than following roaming group leaders. A new
+human site call can redirect the approach before planting begins.
