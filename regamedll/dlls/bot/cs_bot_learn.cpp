@@ -27,6 +27,7 @@
 */
 
 #include "precompiled.h"
+#include "bot/cs_bot_competitive.h"
 
 const float updateTimesliceDuration = 0.5f;
 
@@ -477,15 +478,15 @@ void CCSBot::StartSaveProcess()
 
 void CCSBot::UpdateSaveProcess()
 {
-	char gd[64]{};
+	char gd[MAX_OSPATH]{};
 	GET_GAME_DIR(gd);
 
 	char filename[MAX_OSPATH];
 	Q_snprintf(filename, sizeof(filename), "%s\\%s", gd, TheBots->GetNavMapFilename());
-	SaveNavigationMap(filename);
+	bool saved = SaveNavigationMap(filename);
 
 	char msg[256]{};
-	Q_snprintf(msg, sizeof(msg), "Navigation file '%s' saved.", filename);
+	Q_snprintf(msg, sizeof(msg), "Navigation file '%s': %s.", filename, saved ? "saved" : "save FAILED");
 	HintMessageToAllPlayers(msg);
 	CONSOLE_ECHO("%s\n", msg);
 
@@ -495,6 +496,7 @@ void CCSBot::UpdateSaveProcess()
 	// tell bot manager that the analysis is completed
 	if (TheCSBots())
 		TheCSBots()->AnalysisCompleted();
+	CompetitiveBots::ResetNavigationLearning();
 }
 
 void CCSBot::StartNormalProcess()

@@ -1,4 +1,5 @@
 #include "precompiled.h"
+#include "bot/cs_bot_competitive.h"
 
 // STL uses exceptions, but we are not compiling with them - ignore warning
 #pragma warning(disable : 4530)
@@ -18,7 +19,54 @@
 
 #ifndef _WIN32
 #include <unistd.h>
+#include <sys/file.h>
 #endif // _WIN32
+
+// Resolve the backend's map-specific NAV link so atomic publication preserves it.
+static void NavigationWriteTarget(const char *filename, char (&target)[MAX_OSPATH]) {
+ Q_strlcpy(target,filename);Q_FixSlashes(target);
+#ifndef _WIN32
+ char link[MAX_OSPATH];ssize_t length=readlink(target,link,sizeof(link)-1);
+ if(length>0 && size_t(length)<sizeof(link)-1){link[length]=0;if(link[0]=='/')Q_strlcpy(target,link);else {char *slash=strrchr(target,'/');if(slash)slash[1]=0;else target[0]=0;Q_strlcat(target,link);}}
+#endif
+}
+namespace CompetitiveBots {
+namespace {
+float nextNavigationTry=0;
+#ifdef _WIN32
+HANDLE navigationLease=INVALID_HANDLE_VALUE;
+#else
+int navigationLease=-1;
+#endif
+}
+void ResetNavigationLearning() {
+#ifdef _WIN32
+ if(navigationLease!=INVALID_HANDLE_VALUE){CloseHandle(navigationLease);navigationLease=INVALID_HANDLE_VALUE;}
+#else
+ if(navigationLease>=0){close(navigationLease);navigationLease=-1;}
+#endif
+ nextNavigationTry=0;
+}
+void TryNavigationLearning(CCSBot *bot) {
+ if(!bot || !bot->IsAlive() || !TheNavAreaList.empty() || TheCSBots()->IsLearningMap() || gpGlobals->time<nextNavigationTry)return;
+ nextNavigationTry=gpGlobals->time+1;
+ char game[MAX_OSPATH],path[MAX_OSPATH],target[MAX_OSPATH],lock[MAX_OSPATH];GET_GAME_DIR(game);
+ Q_snprintf(path,sizeof(path),"%s/maps/%s.nav",game,STRING(gpGlobals->mapname));NavigationWriteTarget(path,target);
+ Q_snprintf(lock,sizeof(lock),"%s.lock",target);
+#ifdef _WIN32
+ navigationLease=CreateFileA(lock,GENERIC_READ|GENERIC_WRITE,0,nullptr,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
+ if(navigationLease==INVALID_HANDLE_VALUE)return;
+#else
+ navigationLease=open(lock,O_CREAT|O_RDWR,0600);
+ if(navigationLease<0)return;
+ if(flock(navigationLease,LOCK_EX|LOCK_NB)){close(navigationLease);navigationLease=-1;return;}
+#endif
+ // Another match may have finished while we waited. Load before learning again.
+ TheCSBots()->RetryNavigationLoad();
+ if(TheCSBots()->LoadNavigationMap()){ResetNavigationLearning();return;}
+ TheCSBots()->SetLearningMapFlag();bot->BeginNavigationLearning();
+}
+}
 
 PlaceDirectory placeDirectory;
 
@@ -569,13 +617,21 @@ bool SaveNavigationMap(const char *filename)
 	if (!filename)
 		return false;
 
-	// Store the NAV file
-	Q_FixSlashes(const_cast<char *>(filename));
+ // Write privately, then publish the complete file atomically.
+ char target[MAX_OSPATH],temporary[MAX_OSPATH];NavigationWriteTarget(filename,target);
+#ifdef _WIN32
+ Q_snprintf(temporary,sizeof(temporary),"%s.next.%lu",target,(unsigned long)GetCurrentProcessId());
+#else
+ Q_snprintf(temporary,sizeof(temporary),"%s.next.%ld",target,(long)getpid());
+#endif
+ char *bspFilename = GetBspFilename();
+ if(!bspFilename)return false;
+
 
 #ifdef WIN32
-	int fd = _open(filename, _O_BINARY | _O_CREAT | _O_WRONLY, _S_IREAD | _S_IWRITE);
+	int fd = _open(temporary, _O_BINARY | _O_CREAT | _O_TRUNC | _O_WRONLY, _S_IREAD | _S_IWRITE);
 #else
-	int fd = creat(filename, S_IRUSR | S_IWUSR | S_IRGRP);
+	int fd = creat(temporary, S_IRUSR | S_IWUSR | S_IRGRP);
 #endif // WIN32
 
 	if (fd < 0)
@@ -591,9 +647,7 @@ bool SaveNavigationMap(const char *filename)
 
 	// get size of source bsp file and store it in the nav file
 	// so we can test if the bsp changed since the nav file was made
-	char *bspFilename = GetBspFilename();
-	if (!bspFilename)
-		return false;
+
 
 	unsigned int bspSize = (unsigned int)GET_FILE_SIZE(bspFilename);
 	CONSOLE_ECHO("Size of bsp file '%s' is %u bytes.\n", bspFilename, bspSize);
@@ -630,8 +684,14 @@ bool SaveNavigationMap(const char *filename)
 	fsync(fd);
 #endif
 
-	_close(fd);
-	return true;
+ _close(fd);
+#ifdef _WIN32
+ bool published=MoveFileExA(temporary,target,MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)!=0;
+#else
+ bool published=rename(temporary,target)==0;
+#endif
+ if(!published)remove(temporary);
+ return published;
 }
 
 // Load place map
@@ -833,6 +893,7 @@ NavErrorType LoadNavigationMap()
 			CONSOLE_ECHO("\n-----------------\n");
 			CONSOLE_ECHO(msg);
 			CONSOLE_ECHO("-----------------\n\n");
+			return NAV_INVALID_FILE;
 		}
 	}
 

@@ -27,6 +27,7 @@
 */
 
 #include "precompiled.h"
+#include "bot/cs_bot_competitive.h"
 
 // This method is the ONLY legal way to change a bot's current state
 void CCSBot::SetState(BotState *state)
@@ -294,6 +295,8 @@ void CCSBot::Attack(CBasePlayer *victim)
 {
 	if (!victim)
 		return;
+
+	if (CompetitiveBots::Enabled() && (!CompetitiveBots::TargetAllowed(victim) || !IsVisible(victim, true))) return;
 
 	// zombies never attack
 	if (cv_bot_zombie.value != 0.0f)

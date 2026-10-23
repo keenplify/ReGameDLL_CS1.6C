@@ -27,10 +27,21 @@
 */
 
 #include "precompiled.h"
+#include "bot/cs_bot_competitive.h"
 
 // Lightweight maintenance, invoked frequently
 void CCSBot::Upkeep()
 {
+	if (CompetitiveBots::Pause(this)) return;
+	// Sensing runs more slowly than upkeep. Never track or keep rapid-firing
+	// at a target that has since moved behind cover or gained protection.
+	if (CompetitiveBots::Enabled() && m_enemy.IsValid()
+		&& (!CompetitiveBots::TargetAllowed(m_enemy) || !IsVisible(m_enemy, false))) {
+		m_isEnemyVisible = false;
+		m_visibleEnemyParts = NONE;
+		StopRapidFire();
+		if (!CompetitiveBots::IsManagingGrenade(this)) ClearPrimaryAttack();
+	}
 	if (TheCSBots()->IsLearningMap() || !IsAlive())
 		return;
 
@@ -49,7 +60,7 @@ void CCSBot::Upkeep()
 
 			if (IsEnemyVisible())
 			{
-				if (GetProfile()->GetSkill() > 0.5f)
+				if (CompetitiveBots::ExecutionSkill(this) > 0.5f)
 				{
 					const float k = 3.0f;
 					m_aimSpot = (m_enemy->pev->velocity - pev->velocity) * g_flBotCommandInterval * k + m_enemy->pev->origin;
@@ -60,7 +71,7 @@ void CCSBot::Upkeep()
 				bool aimBlocked = false;
 				const float sharpshooter = 0.8f;
 
-				if (IsUsingAWP() || IsUsingShotgun() || IsUsingMachinegun() || GetProfile()->GetSkill() < sharpshooter
+				if (IsUsingAWP() || IsUsingShotgun() || IsUsingMachinegun() || (CompetitiveBots::Enabled() ? !CompetitiveBots::AimAtHead(this) : CompetitiveBots::ExecutionSkill(this) < sharpshooter)
 					|| (IsActiveWeaponRecoilHigh() && !IsUsingPistol() && !IsUsingSniperRifle()))
 				{
 					if (IsEnemyPartVisible(CHEST))
@@ -108,6 +119,7 @@ void CCSBot::Upkeep()
 				m_aimSpot = m_lastEnemyPosition;
 			}
 
+			CompetitiveBots::SampleAim(this, m_aimSpot);
 			// add in aim error
 			m_aimSpot.x += m_aimOffset.x;
 			m_aimSpot.y += m_aimOffset.y;
@@ -187,6 +199,7 @@ void CCSBot::Upkeep()
 // Heavyweight processing, invoked less often
 void CCSBot::Update()
 {
+	if (CompetitiveBots::Pause(this)) return;
 	if (TheCSBots()->IsAnalysisRequested() && m_processMode == PROCESS_NORMAL)
 	{
 		TheCSBots()->AckAnalysisRequest();
@@ -469,6 +482,9 @@ void CCSBot::Update()
 		m_isEnemyVisible = false;
 	}
 
+	if (CompetitiveBots::UpdateGrenade(this)) return;
+	if (CompetitiveBots::PauseForTyping(this)) return;
+
 	// if we have seen an enemy recently, keep an eye on him if we can
 	const float seenRecentTime = 3.0f;
 	if (m_enemy.IsValid() && GetTimeSinceLastSawEnemy() < seenRecentTime)
@@ -517,7 +533,7 @@ void CCSBot::Update()
 
 #ifdef REGAMEDLL_FIXES
 	// bots with low skill cannot switch weapons underwater
-	if (GetProfile()->GetSkill() > 0.4f && pev->waterlevel == 3 && !IsActiveWeaponCanShootUnderwater())
+	if (CompetitiveBots::ExecutionSkill(this) > 0.4f && pev->waterlevel == 3 && !IsActiveWeaponCanShootUnderwater())
 	{
 		EquipBestWeapon(MUST_EQUIP);
 	}

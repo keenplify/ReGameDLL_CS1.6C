@@ -1,4 +1,5 @@
 #include "precompiled.h"
+#include "bot/cs_bot_competitive.h"
 
 int gmsgWeapPickup = 0;
 int gmsgHudText = 0;
@@ -1001,6 +1002,8 @@ void EXT_FUNC __API_HOOK(SendSayMessage)(CBasePlayer *pPlayer, const char *pszCm
 		msg[len - 1] = '\0';
 		len--;
 	}
+
+	CompetitiveBots::Chat(pPlayer, teamonly != FALSE, msg);
 
 	Q_strlcat(text, msg);
 	Q_strlcat(text, "\n");
@@ -5019,6 +5022,7 @@ int EXT_FUNC GetWeaponData(edict_t *pEdict, struct weapon_data_s *info)
 // Data sent to current client only engine sets cd to 0 before calling.
 void EXT_FUNC UpdateClientData(const edict_t *ent, int sendweapons, struct clientdata_s *cd)
 {
+	CompetitiveBots::UpdateLatency(ent);
 	if (!ent || !ent->pvPrivateData)
 		return;
 

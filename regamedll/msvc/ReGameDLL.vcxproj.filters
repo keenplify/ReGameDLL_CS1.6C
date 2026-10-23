@@ -231,6 +231,15 @@
     <ClCompile Include="..\dlls\bot\cs_bot_manager.cpp">
       <Filter>dlls\bot</Filter>
     </ClCompile>
+    <ClCompile Include="..\dlls\bot\cs_bot_competitive.cpp">
+      <Filter>dlls\bot</Filter>
+    </ClCompile>
+    <ClCompile Include="..\dlls\bot\cs_bot_tactics.cpp">
+      <Filter>dlls\bot</Filter>
+    </ClCompile>
+    <ClCompile Include="..\dlls\bot\cs_bot_grenade.cpp">
+      <Filter>dlls\bot</Filter>
+    </ClCompile>
     <ClCompile Include="..\game_shared\bot\bot_manager.cpp">
       <Filter>game_shared\bot</Filter>
     </ClCompile>
@@ -681,6 +690,48 @@
       <Filter>game_shared</Filter>
     </ClInclude>
     <ClInclude Include="..\dlls\bot\cs_bot_manager.h">
+      <Filter>dlls\bot</Filter>
+    </ClInclude>
+    <ClInclude Include="..\dlls\bot\cs_bot_competitive.h">
+      <Filter>dlls\bot</Filter>
+    </ClInclude>
+    <ClInclude Include="..\dlls\bot\competitive_policy.h">
+      <Filter>dlls\bot</Filter>
+    </ClInclude>
+    <ClInclude Include="..\dlls\bot\competitive_execution.h">
+      <Filter>dlls\bot</Filter>
+    </ClInclude>
+    <ClInclude Include="..\dlls\bot\competitive_spree.h">
+      <Filter>dlls\bot</Filter>
+    </ClInclude>
+    <ClInclude Include="..\dlls\bot\competitive_watch.h">
+      <Filter>dlls\bot</Filter>
+    </ClInclude>
+    <ClInclude Include="..\dlls\bot\competitive_holding_utility.h">
+      <Filter>dlls\bot</Filter>
+    </ClInclude>
+    <ClInclude Include="..\dlls\bot\competitive_lagging_bot.h">
+      <Filter>dlls\bot</Filter>
+    </ClInclude>
+    <ClInclude Include="..\dlls\bot\competitive_score_reaction.h">
+      <Filter>dlls\bot</Filter>
+    </ClInclude>
+    <ClInclude Include="..\dlls\bot\competitive_enemy_damage.h">
+      <Filter>dlls\bot</Filter>
+    </ClInclude>
+    <ClInclude Include="..\dlls\bot\competitive_tactical_comms.h">
+      <Filter>dlls\bot</Filter>
+    </ClInclude>
+    <ClInclude Include="..\dlls\bot\competitive_utility.h">
+      <Filter>dlls\bot</Filter>
+    </ClInclude>
+    <ClInclude Include="..\dlls\bot\competitive_ping.h">
+      <Filter>dlls\bot</Filter>
+    </ClInclude>
+    <ClInclude Include="..\dlls\bot\competitive_team_order.h">
+      <Filter>dlls\bot</Filter>
+    </ClInclude>
+    <ClInclude Include="..\dlls\bot\competitive_team_allocation.h">
       <Filter>dlls\bot</Filter>
     </ClInclude>
     <ClInclude Include="..\game_shared\bot\nav_area.h">

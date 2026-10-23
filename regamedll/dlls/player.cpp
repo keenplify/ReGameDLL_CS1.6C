@@ -27,6 +27,7 @@
 */
 
 #include "precompiled.h"
+#include "bot/cs_bot_competitive.h"
 
 BOOL gInitHUD = TRUE;
 
@@ -1045,7 +1046,8 @@ BOOL EXT_FUNC CBasePlayer::__API_HOOK(TakeDamage)(entvars_t *pevInflictor, entva
 		{
 			if (TheBots)
 			{
-				TheBots->OnEvent(EVENT_PLAYER_TOOK_DAMAGE, this, pAttack);
+				CompetitiveBots::ConfirmedDamage(this, pAttack, flDamage);
+			TheBots->OnEvent(EVENT_PLAYER_TOOK_DAMAGE, this, pAttack);
 			}
 
 			if (TheCareerTasks)
@@ -1303,6 +1305,7 @@ BOOL EXT_FUNC CBasePlayer::__API_HOOK(TakeDamage)(entvars_t *pevInflictor, entva
 	{
 		if (TheBots)
 		{
+			CompetitiveBots::ConfirmedDamage(this, pAttack, flDamage);
 			TheBots->OnEvent(EVENT_PLAYER_TOOK_DAMAGE, this, pAttack);
 		}
 

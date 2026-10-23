@@ -1,4 +1,5 @@
 #include "precompiled.h"
+#include "bot/cs_bot_competitive.h"
 
 void PlayerBlind(CBasePlayer *pPlayer, entvars_t *pevInflictor, entvars_t *pevAttacker, float fadeTime, float fadeHold, int alpha, Vector &color)
 {
@@ -22,6 +23,7 @@ void PlayerBlind(CBasePlayer *pPlayer, entvars_t *pevInflictor, entvars_t *pevAt
 
 	float flDurationTime = fadeTime * 0.33;
 	pPlayer->Blind(flDurationTime, fadeHold, fadeTime, alpha);
+	CompetitiveBots::Blinded(pPlayer, pevAttacker ? CBaseEntity::Instance(pevAttacker) : nullptr, fadeHold, alpha);
 
 	if (TheBots)
 	{

@@ -27,6 +27,7 @@
 */
 
 #include "precompiled.h"
+#include "bot/cs_bot_competitive.h"
 
 CBotManager *TheBots = nullptr;
 
@@ -113,6 +114,7 @@ CCSBotManager::CCSBotManager()
 // Invoked when a new round begins
 void CCSBotManager::RestartRound()
 {
+	CompetitiveBots::RoundRestart();
 	// extend
 	CBotManager::RestartRound();
 
@@ -142,6 +144,7 @@ void CCSBotManager::RestartRound()
 // Called each frame
 void CCSBotManager::StartFrame()
 {
+	CompetitiveBots::Frame();
 	// EXTEND
 	CBotManager::StartFrame();
 	MonitorBotCVars();
@@ -231,6 +234,8 @@ bool CCSBotManager::IsOnOffense(CBasePlayer *pPlayer) const
 // Invoked when a map has just been loaded
 void CCSBotManager::ServerActivate()
 {
+	CompetitiveBots::ResetNavigationLearning();
+	CompetitiveBots::Reset();
 	m_isMapDataLoaded = false;
 
 	m_zoneCount = 0;
@@ -1366,6 +1371,7 @@ bool CCSBotManager::LoadNavigationMap()
 		if (navStatus != NAV_CANT_ACCESS_FILE)
 			CONSOLE_ECHO("\tTry regenerating it using the command: bot_nav_analyze\n");
 
+		DestroyNavigationMap();
 		return false;
 	}
 
@@ -1620,7 +1626,7 @@ bool CCSBotManager::AddBot(const BotProfile *profile, BotProfileTeamType team)
 
 	//int nJoinedTeam;
 	ClientPutInServer(pBot->edict());
-	SET_CLIENT_KEY_VALUE(pBot->entindex(), GET_INFO_BUFFER(pBot->edict()), "*bot", "1");
+	SET_CLIENT_KEY_VALUE(pBot->entindex(), GET_INFO_BUFFER(pBot->edict()), "*bot", CompetitiveBots::ShowsLatency() ? "" : "1");
 
 	pBot->m_iMenu = Menu_ChooseTeam;
 	pBot->m_iJoiningState = PICKINGTEAM;
@@ -1765,6 +1771,7 @@ void CCSBotManager::OnEvent(GameEventType event, CBaseEntity *pEntity, CBaseEnti
 		break;
 	}
 
+	CompetitiveBots::Event(event, pEntity, pOther);
 	CBotManager::OnEvent(event, pEntity, pOther);
 }
 

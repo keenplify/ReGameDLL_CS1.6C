@@ -27,6 +27,7 @@
 */
 
 #include "precompiled.h"
+#include "cs_bot_competitive.h"
 #include <algorithm>
 
 BotPhraseManager *TheBotPhrases = nullptr;
@@ -1624,6 +1625,7 @@ inline void SayWhere(BotStatement *say, Place place)
 // Report enemy sightings
 void BotChatterInterface::EnemySpotted()
 {
+	if (CompetitiveBots::PlayerPingsEnabled()) return; // Coordinated ping replaces duplicate sighting chatter.
 	// NOTE: This could be a few seconds out of date (enemy is in an adjacent place)
 	Place place = m_me->GetEnemyPlace();
 
@@ -1826,6 +1828,7 @@ bool BotChatterInterface::NeedBackup()
 
 void BotChatterInterface::PinnedDown()
 {
+	if (CompetitiveBots::Enabled()) { CompetitiveBots::Tactical(m_me,"Need backup.","%!MRAD_HITASSIST"); return; }
 	// this is a form of "need backup"
 	const float minRequestInterval = 10.0f;
 	if (m_needBackupInterval.IsLessThen(minRequestInterval))
@@ -1871,6 +1874,7 @@ void BotChatterInterface::HeardNoise(const Vector *pos)
 
 void BotChatterInterface::KilledMyEnemy(int victimID)
 {
+	if (CompetitiveBots::Enabled()) { CompetitiveBots::Tactical(m_me,"Enemy down.","%!MRAD_ENEMYDOWN"); return; }
 	// only report if we killed the last enemy in the area
 	if (m_me->GetNearbyEnemyCount() <= 1)
 		return;

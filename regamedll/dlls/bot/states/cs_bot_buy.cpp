@@ -27,6 +27,7 @@
 */
 
 #include "precompiled.h"
+#include "bot/cs_bot_competitive.h"
 
 bool HasDefaultPistol(CCSBot *me)
 {
@@ -237,6 +238,9 @@ inline WeaponType GetWeaponType(const char *alias)
 
 void BuyState::OnUpdate(CCSBot *me)
 {
+	if (CompetitiveBots::Completed()) return;
+	if (CompetitiveBots::WaitForTeamBuy(me)) return;
+	if (CompetitiveBots::Saving(me)) m_doneBuying = true;
 	// wait for a Navigation Mesh
 	if (!TheNavAreaList.size())
 		return;

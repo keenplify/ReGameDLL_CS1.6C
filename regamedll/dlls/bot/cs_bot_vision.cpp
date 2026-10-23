@@ -27,6 +27,9 @@
 */
 
 #include "precompiled.h"
+#include "bot/cs_bot_competitive.h"
+#include "competitive_policy.h"
+#include "competitive_watch.h"
 
 // Used to update view angles to stay on a ladder
 float StayOnLadderLine(CCSBot *me, const CNavLadder *ladder)
@@ -245,6 +248,9 @@ bool CCSBot::IsVisible(const Vector *pos, bool testFOV) const
 	TraceResult result;
 	UTIL_TraceLine(GetEyePosition(), *pos, ignore_monsters, ignore_glass, ENT(pev), &result);
 
+	if (CompetitiveBots::Enabled() && !CompetitiveBotPolicy::ClearTrace(result.flFraction, result.fStartSolid, result.fAllSolid))
+		return false;
+
 	if (result.flFraction != 1.0f)
 		return false;
 
@@ -255,6 +261,10 @@ bool CCSBot::IsVisible(const Vector *pos, bool testFOV) const
 // Check parts in order of importance. Return the first part seen in "visParts" if it is non-NULL.
 bool CCSBot::IsVisible(CBasePlayer *pPlayer, bool testFOV, unsigned char *visParts) const
 {
+	if (CompetitiveBots::Enabled() && !CompetitiveBots::TargetAllowed(pPlayer)) {
+		if (visParts) *visParts = NONE;
+		return false;
+	}
 #ifdef REGAMEDLL_ADD // REGAMEDLL_FIXES ?
 	if ((pPlayer->pev->flags & FL_NOTARGET) || (pPlayer->pev->effects & EF_NODRAW))
 		return false;
@@ -445,13 +455,15 @@ void CCSBot::UpdateLookAround(bool updateNow)
 	if (UpdateLookAtNoise())
 		return;
 
+	if (CompetitiveBots::Enabled() && IsNotMoving() && IsLookingAtSpot(PRIORITY_MEDIUM)) return;
+
 	if (IsNotMoving())
 	{
 		// if we're sniping, zoom in to watch our approach points
 		if (IsUsingSniperRifle())
 		{
 			// low skill bots don't pre-zoom
-			if (GetProfile()->GetSkill() > 0.4f)
+			if (CompetitiveBots::ExecutionSkill(this) > 0.4f)
 			{
 				if (!IsViewMoving())
 				{
@@ -470,6 +482,15 @@ void CCSBot::UpdateLookAround(bool updateNow)
 		if (!m_lastKnownArea)
 			return;
 
+        // A door or moving crate can invalidate a previously clear low-priority hold.
+        if (CompetitiveBots::Enabled() && IsLookingAtSpot(PRIORITY_LOW)) {
+            TraceResult trace;
+            UTIL_TraceLine(GetEyePosition(), m_lookAtSpot, ignore_monsters, edict(), &trace);
+            if (trace.fStartSolid || trace.fAllSolid || trace.flFraction < .9999f) {
+                ClearLookAt();
+                m_lookAroundStateTimestamp = 0;
+            }
+        }
 		if (gpGlobals->time < m_lookAroundStateTimestamp)
 			return;
 
@@ -478,6 +499,38 @@ void CCSBot::UpdateLookAround(bool updateNow)
 			m_lookAroundStateTimestamp = gpGlobals->time + RANDOM_FLOAT(5.0f, 10.0f);
 		else
 			m_lookAroundStateTimestamp = gpGlobals->time + RANDOM_FLOAT(1.0f, 2.0f);
+
+        if (CompetitiveBots::Enabled()) {
+            const Vector eye = GetEyePosition();
+            const float hold = Q_max(.5f, m_lookAroundStateTimestamp - gpGlobals->time + .25f);
+            // Prefer actual native approach points, but only if we can watch them.
+            const int first = m_approachPointCount ? RANDOM_LONG(0, m_approachPointCount - 1) : 0;
+            for (int i = 0; i < m_approachPointCount; ++i) {
+                Vector spot = m_approachPoint[(first + i) % m_approachPointCount];
+                spot.z += HalfHumanHeight;
+                const Vector delta = spot - eye;
+                TraceResult trace;
+                UTIL_TraceLine(eye, spot, ignore_monsters, edict(), &trace);
+                if (!CompetitiveWatch::Approach(delta.Length2D(), delta.z, trace.flFraction, trace.fStartSolid || trace.fAllSolid)) continue;
+                SetLookAt("Visible approach (Hiding)", &spot, PRIORITY_LOW, hold);
+                return;
+            }
+            // No usable NAV approach: watch open geometry, never hidden players.
+            Vector best;
+            float bestScore = -1;
+            for (int i = 0; i < 16; ++i) {
+                const float angle = (pev->v_angle.y + i * 22.5f) * (M_PI / 180.0f);
+                Vector direction(Q_cos(angle), Q_sin(angle), 0);
+                TraceResult trace;
+                UTIL_TraceLine(eye, eye + direction * 768, ignore_monsters, edict(), &trace);
+                const float distance = 768 * trace.flFraction;
+                const float score = CompetitiveWatch::OpenScore(distance, Q_cos(i * 22.5f * (M_PI / 180.0f)), trace.fStartSolid || trace.fAllSolid);
+                if (score > bestScore) { bestScore = score; best = eye + direction * Q_max(0.0f, distance - 24); }
+            }
+            if (bestScore >= 0) SetLookAt("Open angle (Hiding)", &best, PRIORITY_LOW, hold);
+            else ClearLookAt();
+            return;
+        }
 
 		if (m_approachPointCount == 0)
 		{
@@ -508,7 +561,7 @@ void CCSBot::UpdateLookAround(bool updateNow)
 			// TODO: Use skill parameter instead of accuracy
 
 			// lower skills have exponentially longer delays
-			real_t asleep = (1.0f - GetProfile()->GetSkill());
+			real_t asleep = (1.0f - CompetitiveBots::ExecutionSkill(this));
 			asleep *= asleep;
 			asleep *= asleep;
 
@@ -1075,8 +1128,9 @@ void CCSBot::UpdateReactionQueue()
 	if (m_enemyQueueCount < MAX_ENEMY_QUEUE)
 		m_enemyQueueCount++;
 
+	CompetitiveBots::Notice(this, threat);
 	// clamp reaction time to enemy queue size
-	float reactionTime = GetProfile()->GetReactionTime();
+	float reactionTime = CompetitiveBots::ExecutionReaction(this);
 	float maxReactionTime = (MAX_ENEMY_QUEUE * g_flBotFullThinkInterval) - 0.01f;
 	if (reactionTime > maxReactionTime)
 		reactionTime = maxReactionTime;
@@ -1097,7 +1151,9 @@ CBasePlayer *CCSBot::GetRecognizedEnemy()
 	if (m_enemyQueueAttendIndex >= m_enemyQueueCount)
 		return nullptr;
 
-	return m_enemyQueue[m_enemyQueueAttendIndex].player;
+	auto *enemy = static_cast<CBasePlayer *>(m_enemyQueue[m_enemyQueueAttendIndex].player);
+	if (CompetitiveBots::Enabled() && (!CompetitiveBots::TargetAllowed(enemy) || !IsVisible(enemy, true))) return nullptr;
+	return enemy;
 }
 
 // Return true if the enemy we are "conscious" of is reloading
@@ -1266,7 +1322,7 @@ bool CCSBot::IsNoticable(const CBasePlayer *pPlayer, unsigned char visibleParts)
 	float noticeChance = dispositionChance * coverRatio/100.0f;
 
 	// scale by skill level
-	noticeChance *= (0.5f + 0.5f * GetProfile()->GetSkill());
+	noticeChance *= (0.5f + 0.5f * CompetitiveBots::ExecutionSkill(this));
 
 	// if we are alert, our chance of noticing is much higher
 	//if (IsAlert())

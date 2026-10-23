@@ -62,6 +62,7 @@ public:
 	void OnDestroyNavDataNotify(NavNotifyDestroyType navNotifyType, void *dead);
 	bool IsLearningMap() const { return m_isLearningMap; }
 	void SetLearningMapFlag() { m_isLearningMap = true; }
+	void RetryNavigationLoad() { m_isMapDataLoaded = false; }
 	bool IsAnalysisRequested() const { return m_isAnalysisRequested; }
 	void RequestAnalysis() { m_isAnalysisRequested = true; }
 	void AckAnalysisRequest() { m_isAnalysisRequested = false; }

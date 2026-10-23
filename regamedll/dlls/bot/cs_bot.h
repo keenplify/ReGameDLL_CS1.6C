@@ -376,6 +376,8 @@ public:
 	void UseEntity(CBaseEntity *pEntity);				// use the entity
 
 	bool IsBuying() const;
+	void RestartCompetitiveBuying();
+	void BeginNavigationLearning();
 
 #ifdef REGAMEDLL_FIXES
 	void Kill();

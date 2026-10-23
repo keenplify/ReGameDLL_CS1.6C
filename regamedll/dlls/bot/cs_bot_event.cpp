@@ -27,9 +27,11 @@
 */
 
 #include "precompiled.h"
+#include "bot/cs_bot_competitive.h"
 
 void CCSBot::OnEvent(GameEventType event, CBaseEntity *pEntity, CBaseEntity *pOther)
 {
+	if (CompetitiveBots::Completed()) return;
 	GetGameState()->OnEvent(event, pEntity, pOther);
 	GetChatter()->OnEvent(event, pEntity, pOther);
 

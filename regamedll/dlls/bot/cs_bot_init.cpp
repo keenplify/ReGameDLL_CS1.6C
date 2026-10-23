@@ -27,6 +27,7 @@
 */
 
 #include "precompiled.h"
+#include "bot/cs_bot_competitive.h"
 
 cvar_t cv_bot_enable                 = { "bot_enable", "0", 0, 0.0f, nullptr };
 cvar_t cv_bot_traceview              = { "bot_traceview", "0", FCVAR_SERVER, 0.0f, nullptr };
@@ -96,6 +97,7 @@ void Bot_RegisterCVars()
 	if (!AreBotsAllowed())
 		return;
 
+	CompetitiveBots::RegisterCVars();
 	CVAR_REGISTER(&cv_bot_traceview);
 	CVAR_REGISTER(&cv_bot_stop);
 	CVAR_REGISTER(&cv_bot_show_nav);
@@ -335,6 +337,17 @@ void CCSBot::ResetValues()
 
 // Called when bot is placed in map, and when bots are reset after a round ends.
 // NOTE: For some reason, this can be called twice when a bot is added.
+void CCSBot::BeginNavigationLearning() { StartLearnProcess(); }
+
+void CCSBot::RestartCompetitiveBuying()
+{
+	if (!IsAlive() || CompetitiveBots::Completed() || IsAttacking() || IsDefusingBomb()
+		|| GetTask() == PLANT_BOMB || GetTask() == RESCUE_HOSTAGES) return;
+	// Re-enter even if already buying: the backend changed money/loadout.
+	if (IsBuying()) m_buyState.OnEnter(this);
+	else SetState(&m_buyState);
+}
+
 void CCSBot::SpawnBot()
 {
 	TheCSBots()->LoadNavigationMap();
@@ -347,8 +360,7 @@ void CCSBot::SpawnBot()
 
 	if (TheNavAreaList.empty() && !TheCSBots()->IsLearningMap())
 	{
-		TheCSBots()->SetLearningMapFlag();
-		StartLearnProcess();
+		CompetitiveBots::TryNavigationLearning(this);
 	}
 }
 

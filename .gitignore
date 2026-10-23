@@ -1,4 +1,5 @@
 **/build
+/build-competitive/
 *.bat
 *.log
 *.lnk
@@ -21,3 +22,7 @@
 regamedll/version/appversion.h
 regamedll/msvc/PublishPath*.txt
 publish
+
+__pycache__/
+
+/dist/

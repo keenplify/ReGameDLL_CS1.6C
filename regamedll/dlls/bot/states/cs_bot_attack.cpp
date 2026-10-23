@@ -27,6 +27,7 @@
 */
 
 #include "precompiled.h"
+#include "bot/cs_bot_competitive.h"
 
 // Begin attacking
 void AttackState::OnEnter(CCSBot *me)
@@ -134,6 +135,7 @@ void AttackState::OnEnter(CCSBot *me)
 	}
 
 	m_dodge = (RANDOM_FLOAT(0.0f, 100.0f) < dodgeChance) != 0;
+	CompetitiveBots::BeginCombatMovement(me);
 
 	// decide whether we might bail out of this fight
 	m_isCoward = (RANDOM_FLOAT(0.0f, 100.0f) > 100.0f * me->GetProfile()->GetAggression());
@@ -481,6 +483,13 @@ void AttackState::OnUpdate(CCSBot *me)
 		return;
 	}
 
+	if (CompetitiveBots::PreferMobileCombat(me))
+	{
+		m_dodge = true;
+		m_crouchAndHold = false;
+		me->StandUp();
+	}
+
 	if (gpGlobals->time > m_reacquireTimestamp)
 		me->FireWeaponAtEnemy();
 
@@ -521,7 +530,7 @@ void AttackState::OnUpdate(CCSBot *me)
 			{
 				// high-skill bots may jump when first engaging the enemy (if they are moving)
 				const float jumpChance = 33.3f;
-				if (m_firstDodge && me->GetProfile()->GetSkill() > 0.5f && RANDOM_FLOAT(0, 100) < jumpChance && !me->IsNotMoving())
+				if (!CompetitiveBots::MobileCombatWeapon(me) && m_firstDodge && me->GetProfile()->GetSkill() > 0.5f && RANDOM_FLOAT(0, 100) < jumpChance && !me->IsNotMoving())
 					next = RANDOM_LONG(0, NUM_ATTACK_STATES - 1);
 				else
 					next = RANDOM_LONG(0, NUM_ATTACK_STATES - 2);
@@ -541,12 +550,12 @@ void AttackState::OnUpdate(CCSBot *me)
 		}
 		case SLIDE_LEFT:
 		{
-			me->StrafeLeft();
+			if (CompetitiveBots::SafeCombatStrafe(me, true)) me->StrafeLeft();
 			break;
 		}
 		case SLIDE_RIGHT:
 		{
-			me->StrafeRight();
+			if (CompetitiveBots::SafeCombatStrafe(me, false)) me->StrafeRight();
 			break;
 		}
 		case JUMP:

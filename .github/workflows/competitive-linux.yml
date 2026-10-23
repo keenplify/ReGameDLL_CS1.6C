@@ -1,0 +1,39 @@
+name: Competitive bots Linux x86
+
+on:
+  push:
+    branches: [master, main, 'codex/**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install x86 toolchain
+        run: sudo apt-get update && sudo apt-get install -y g++-multilib cmake python3
+      - name: Configure and build
+        run: |
+          cmake -S . -B build-competitive -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS=-fPIC -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+          cmake --build build-competitive -j2
+      - name: Native policies and mock-only speech tests
+        run: |
+          ctest --test-dir build-competitive --output-on-failure
+          python3 -m unittest discover -s tests -p test_ai_bridge.py
+      - name: Package and verify checksums
+        run: |
+          python3 tools/package_release.py
+          mkdir -p /tmp/competitive-release-check
+          tar -xf dist/regamedll-competitive-linux-x86.tar -C /tmp/competitive-release-check
+          cd /tmp/competitive-release-check
+          sha256sum -c SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: regamedll-competitive-linux-x86
+          path: dist/regamedll-competitive-linux-x86.tar

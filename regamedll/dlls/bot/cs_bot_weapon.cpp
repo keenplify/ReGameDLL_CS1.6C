@@ -27,17 +27,20 @@
 */
 
 #include "precompiled.h"
+#include "bot/cs_bot_competitive.h"
 
 // Fire our active weapon towards our current enemy
 // NOTE: Aiming our weapon is handled in RunBotUpkeep()
 void CCSBot::FireWeaponAtEnemy()
 {
 	CBasePlayer *pEnemy = GetEnemy();
-	if (!pEnemy)
+	if (!pEnemy || (CompetitiveBots::Enabled() && (!CompetitiveBots::TargetAllowed(pEnemy) || !IsVisible(pEnemy, true))))
 	{
 		StopRapidFire();
 		return;
 	}
+
+	if (CompetitiveBots::RecoverRecoil(this)) return;
 
 	if (IsUsingSniperRifle())
 	{
@@ -74,7 +77,7 @@ void CCSBot::FireWeaponAtEnemy()
 			// aiming tolerance depends on how close the target is - closer targets subtend larger angles
 			real_t aimTolerance = Q_cos(Q_atan(halfSize / rangeToEnemy));
 
-			if (onTarget > aimTolerance)
+			if (onTarget > aimTolerance || (CompetitiveBots::EarlyFire(this) && onTarget > 0.94f))
 			{
 				bool doAttack;
 
@@ -129,7 +132,7 @@ void CCSBot::FireWeaponAtEnemy()
 				{
 					// high-skill bots fire their pistols quickly at close range
 					const float closePistolRange = 999999.9f;
-					if (GetProfile()->GetSkill() > 0.75f && rangeToEnemy < closePistolRange)
+					if (CompetitiveBots::ExecutionSkill(this) > 0.75f && rangeToEnemy < closePistolRange)
 					{
 						StartRapidFire();
 
@@ -146,7 +149,7 @@ void CCSBot::FireWeaponAtEnemy()
 				else
 				{
 					const float sprayRange = 400.0f;
-					if (GetProfile()->GetSkill() < 0.5f || rangeToEnemy < sprayRange || IsUsingMachinegun())
+					if (CompetitiveBots::ExecutionSkill(this) < 0.5f || rangeToEnemy < sprayRange || IsUsingMachinegun())
 					{
 						// spray 'n pray if enemy is close, or we're not that good, or we're using the big machinegun
 						m_fireWeaponTimestamp = 0.0f;
@@ -206,7 +209,7 @@ void CCSBot::SetAimOffset(float accuracy)
 
 	float range = (m_lastEnemyPosition - pev->origin).Length();
 	const real_t maxOffset = range * (real_t(m_iFOV) / DEFAULT_FOV) * 0.1;
-	float error = maxOffset * (1 - accuracy);
+	float error = CompetitiveBots::AimError(this, maxOffset * (1 - accuracy));
 
 	m_aimOffsetGoal[0] = RANDOM_FLOAT(-error, error);
 	m_aimOffsetGoal[1] = RANDOM_FLOAT(-error, error);
@@ -216,12 +219,12 @@ void CCSBot::SetAimOffset(float accuracy)
 	m_aimOffsetTimestamp = gpGlobals->time + RANDOM_FLOAT(0.25f, 1.0f);
 }
 
-// Wiggle aim error based on GetProfile()->GetSkill()
+// Wiggle aim error based on CompetitiveBots::ExecutionSkill(this)
 void CCSBot::UpdateAimOffset()
 {
 	if (gpGlobals->time >= m_aimOffsetTimestamp)
 	{
-		SetAimOffset(GetProfile()->GetSkill());
+		SetAimOffset(CompetitiveBots::ExecutionSkill(this));
 	}
 
 	// move current offset towards goal offset
@@ -415,7 +418,7 @@ bool CCSBot::DoEquip(CBasePlayerWeapon *pWeapon)
 		return false;
 
 #ifdef REGAMEDLL_FIXES
-	if (GetProfile()->GetSkill() > 0.4f && pev->waterlevel == 3 && (pWeapon->iFlags() & ITEM_FLAG_NOFIREUNDERWATER))
+	if (CompetitiveBots::ExecutionSkill(this) > 0.4f && pev->waterlevel == 3 && (pWeapon->iFlags() & ITEM_FLAG_NOFIREUNDERWATER))
 		return false;
 #endif
 
@@ -504,6 +507,7 @@ bool CCSBot::HasGrenade() const
 // Equip a grenade, return false if we cant
 bool CCSBot::EquipGrenade(bool noSmoke)
 {
+	if (CompetitiveBots::SmartGrenades()) return false; // Coordinator selects utility by role.
 	// snipers don't use grenades
 	if (IsSniper())
 		return false;
@@ -575,6 +579,7 @@ bool CCSBot::IsUsingHEGrenade() const
 // Begin the process of throwing the grenade
 void CCSBot::ThrowGrenade(const Vector *target)
 {
+	if (CompetitiveBots::SmartGrenades()) return; // Use the validated remembered-sighting throw.
 	if (IsUsingGrenade() && !m_isWaitingToTossGrenade)
 	{
 		const float angleTolerance = 1.0f;
@@ -700,7 +705,7 @@ void CCSBot::ReloadCheck()
 	if (IsActiveWeaponClipEmpty())
 	{
 		// high-skill players switch to pistol instead of reloading during combat
-		if (GetProfile()->GetSkill() > 0.5f && IsAttacking())
+		if (CompetitiveBots::ExecutionSkill(this) > 0.5f && IsAttacking())
 		{
 			if (!GetActiveWeapon()->IsPistol() && !IsPistolEmpty())
 			{
@@ -713,7 +718,7 @@ void CCSBot::ReloadCheck()
 	else if (GetTimeSinceLastSawEnemy() > safeReloadWaitTime && GetActiveWeaponAmmoRatio() <= reloadAmmoRatio)
 	{
 		// high-skill players use all their ammo and switch to pistol instead of reloading during combat
-		if (GetProfile()->GetSkill() > 0.5f && IsAttacking())
+		if (CompetitiveBots::ExecutionSkill(this) > 0.5f && IsAttacking())
 			return;
 	}
 	else
@@ -732,7 +737,7 @@ void CCSBot::ReloadCheck()
 	if (GetNearbyEnemyCount())
 	{
 		// avoid enemies while reloading (above 0.75 skill always hide to reload)
-		const float hideChance = 25.0f + 100.0f * GetProfile()->GetSkill();
+		const float hideChance = 25.0f + 100.0f * CompetitiveBots::ExecutionSkill(this);
 
 		if (!IsHiding() && RANDOM_FLOAT(0.0f, 100.0f) < hideChance)
 		{
@@ -791,7 +796,7 @@ void CCSBot::SilencerCheck()
 			return;
 
 		// equip silencer if we want to and we don't have a shield.
-		if (isSilencerOn != (GetProfile()->PrefersSilencer() || GetProfile()->GetSkill() > 0.7f) && !HasShield())
+		if (isSilencerOn != (GetProfile()->PrefersSilencer() || CompetitiveBots::ExecutionSkill(this) > 0.7f) && !HasShield())
 #endif
 		{
 			PrintIfWatched("%s silencer!\n", (isSilencerOn) ? "Unequipping" : "Equipping");
