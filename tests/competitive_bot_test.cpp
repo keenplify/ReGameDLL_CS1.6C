@@ -74,7 +74,14 @@ int main()
  spree.Kill(3,false);CHECK(!spree.Ready(4));CHECK(spree.Ready(4.5f));
  spree.Retry(4.5f);CHECK(spree.count==3 && !spree.Ready(4.8f));CHECK(spree.Ready(5));
  spree.Kill(5,false);spree.Kill(5.1f,false);CHECK(spree.count==5);
- spree.Delivered();spree.Kill(7,false);CHECK(!spree.Ready(9));
+ spree.Delivered();spree.Kill(7,false);CHECK(spree.count==6);
+ CHECK(CompetitiveSpree::Ace(true,5,0,5));
+ CHECK(CompetitiveSpree::Ace(true,3,0,3));
+ CHECK(!CompetitiveSpree::Ace(true,5,1,5));
+ CHECK(!CompetitiveSpree::Ace(true,6,1,5));
+ CHECK(!CompetitiveSpree::Ace(true,5,0,4));
+ CHECK(!CompetitiveSpree::Ace(true,2,0,2));
+ CHECK(!CompetitiveSpree::Ace(false,5,0,5));
  spree=CompetitiveSpree::Pending {};CHECK(spree.kills==0 && !spree.Ready(10));
  for(int i=0;i<5;++i)spree.Kill(float(i),true);
  spree.Died(true);CHECK(spree.kills==0 && spree.count==0 && !spree.Ready(6));

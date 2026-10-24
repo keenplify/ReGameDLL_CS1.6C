@@ -43,6 +43,7 @@ struct Reply {
 	bool tactical = false;
 	bool planAnnouncement = false;
  bool captainReply = false;
+ bool aceReply = false;
 	int listenerSlot = 0, subjectSlot = 0;
 	Recipient subject;
 	Recipient speaker, listener;
@@ -622,16 +623,21 @@ bool Speak(CCSBot *bot,CBasePlayer *listener,bool teamOnly,const char *line,bool
 }
 bool ReactToSpree(CBasePlayer *player,int kills) {
  if(!Enabled() || Completed() || !roundChat.value || !textChat.value || kills<3 || !CombatTeam(player))return false;
- int channel=Ffa()?0:int(player->m_iTeam);if(gpGlobals->time<nextSpreeChat[channel])return false;
+ bool ace=IsRoundAce(player);
+ int channel=Ffa()?0:int(player->m_iTeam);if(!ace && gpGlobals->time<nextSpreeChat[channel])return false;
  char name[64],line[128];CleanName(player,name);
  // Personal reactions are separate from the two tactical reporter roles.
  for(int pass=0;pass<2;++pass)for(int i=1;i<=gpGlobals->maxClients;++i){
   auto *p=Player(i);if(!p || !p->IsBot() || !p->IsAlive() || (!Ffa() && p->m_iTeam!=player->m_iTeam) || ((p==player)!=(pass==1)))continue;
   char *info=GET_INFO_BUFFER(p->edict());const char *style=g_engfuncs.pfnInfoKeyValue(info,"_16c_style");if(style && !Q_strcmp(style,"quiet"))continue;
   if(p==player)Q_snprintf(line,sizeof(line),!RoundTacticsAllowed()?"%d in a row":"got %d this round",kills);
-  else if(RoundTacticsAllowed() && kills==5)Q_snprintf(line,sizeof(line),"nice ace, %s!",name);
+  else if(ace)Q_snprintf(line,sizeof(line),"nice ace, %s!",name);
   else Q_snprintf(line,sizeof(line),"nice %dk, %s!",kills,name);
-  if(Queue(static_cast<CCSBot *>(p),nullptr,!Ffa(),line,false)){nextSpreeChat[channel]=gpGlobals->time+8;return true;}
+  if(Queue(static_cast<CCSBot *>(p),nullptr,!Ffa(),line,false)){
+   auto &reply=State(p).reply;reply.aceReply=ace && p!=player;
+   reply.subjectSlot=player->entindex();reply.subject=Identity(player);
+   nextSpreeChat[channel]=gpGlobals->time+8;return true;
+  }
  }
  return false;
 }
@@ -955,6 +961,7 @@ void Frame()
 			reply.round, roundSerial, reply.speaker, Identity(bot), reply.listener, Identity(human))
 			|| (human && !CanHear(bot, human, reply.teamOnly)) || (reply.teamOnly && Ffa())
 			|| (reply.subjectSlot && !CompetitiveBotPolicy::SameRecipient(reply.subject, Identity(Player(reply.subjectSlot))))
+            || (reply.aceReply && !IsRoundAce(Player(reply.subjectSlot)))
             || (reply.captainReply && !RoundTacticsAllowed())
             || (reply.tactical && Completed())) { reply.active = false; continue; }
 		if (reply.tactical && (bot->IsAttacking() || bot->GetTimeSinceAttacked() < 2.0f

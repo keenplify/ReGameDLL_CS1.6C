@@ -412,7 +412,11 @@ calls before engine FFA settings settle. Standalone round-based games without th
 managed phase cvar retain captain tactics. Queued captain lines are rechecked at
 delivery and inactive plans are cleared.
 
-Spree reactions start at three enemy kills. Round play announces an ace only at
-exactly five kills, with counters and reaction cooldowns reset each round. FFA
+Spree reactions start at three enemy kills. Round play announces an ace only after the player personally eliminates every
+member of the enemy team (at least three opponents), with no enemies alive, with counters and reaction cooldowns reset each round. FFA
 and warmup count kills in one life and clear pending milestones on death; five
 respawn-mode kills are a 5k, not an ace.
+
+Ace credit records each enemy identity per round; teammates finishing the remaining
+opponents cannot turn another player's 3k/4k into an ace. Queued ace praise rechecks
+the enemy roster and deaths before delivery.
