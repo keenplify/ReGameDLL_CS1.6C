@@ -402,3 +402,17 @@ executes (95% on ordinary buy rounds). Splits are situational: 35% during ecos,
 actually gather the group, including C4, before switching to the called site;
 a 20-second bound prevents a stuck player from stalling the execute. CT plans
 retain defensive site coverage. Human calls still replace automatic plans.
+
+### Warmup communication and spree boundaries
+
+On native CS 1.6, captain site allocations, automatic plan announcements and their
+queued acknowledgements are disabled during FFA and managed pre-match warmup
+(`competitive_match_live 0`). The managed deathmatch mode also suppresses these
+calls before engine FFA settings settle. Standalone round-based games without the
+managed phase cvar retain captain tactics. Queued captain lines are rechecked at
+delivery and inactive plans are cleared.
+
+Spree reactions start at three enemy kills. Round play announces an ace only at
+exactly five kills, with counters and reaction cooldowns reset each round. FFA
+and warmup count kills in one life and clear pending milestones on death; five
+respawn-mode kills are a 5k, not an ace.

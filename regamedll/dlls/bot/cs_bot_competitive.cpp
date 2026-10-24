@@ -42,6 +42,7 @@ struct Reply {
 	bool teamOnly = false;
 	bool tactical = false;
 	bool planAnnouncement = false;
+ bool captainReply = false;
 	int listenerSlot = 0, subjectSlot = 0;
 	Recipient subject;
 	Recipient speaker, listener;
@@ -459,7 +460,7 @@ bool MakePlan(CBasePlayer *leader,bool human,TeamAllocation allocation,TeamOrder
  plans[team]=next;return true;
 }
 bool HumanCaptainCall(CBasePlayer *human,const char *text) {
- if(!captainMode.value || !Enabled() || Completed() || Ffa() || !human->IsAlive()) return false;
+ if(!captainMode.value || !Enabled() || Completed() || !RoundTacticsAllowed() || !human->IsAlive()) return false;
  char phrase[97];bool question=false;
  if(!normalizeTeamPhrase(text,phrase,question) || question) return false;
  TeamAllocation allocation;
@@ -473,11 +474,12 @@ bool HumanCaptainCall(CBasePlayer *human,const char *text) {
  bool accepted=MakePlan(human,true,allocation,split?TeamOrder::None:order);
  if(accepted){humanCaptainUntil[human->m_iTeam]=gpGlobals->time+600;humanLeaderSlot[human->m_iTeam]=human->entindex();humanLeaderId[human->m_iTeam]=GETPLAYERUSERID(human->edict());}
  auto *bot=ElectCaptain(human->m_iTeam);
- if(bot) Queue(bot,human,true,accepted?"roger, moving together":"that split isn't available",true);
+ if(bot && Queue(bot,human,true,accepted?"roger, moving together":"that split isn't available",true)) State(bot).reply.captainReply=true;
  return true;
 }
 void MaintainCaptains() {
- if(!captainMode.value || Completed() || Ffa() || CSGameRules()->m_iRoundWinStatus!=WINSTATUS_NONE
+ if(!RoundTacticsAllowed()){ResetCaptains();return;}
+ if(!captainMode.value || Completed() || CSGameRules()->m_iRoundWinStatus!=WINSTATUS_NONE
     || TheCSBots()->IsBombPlanted() || TheCSBots()->GetScenario()!=CCSBotManager::SCENARIO_DEFUSE_BOMB) return;
  for(auto team:{TERRORIST,CT}) {
   auto &plan=plans[team];
@@ -595,6 +597,12 @@ bool Word(const char *text, const char *word)
 }
 }
 
+bool RoundTacticsAllowed() {
+ // No managed phase cvar in standalone games: retain ordinary round tactics.
+ auto *live=CVAR_GET_POINTER("competitive_match_live");
+ return CompetitiveBotPolicy::RoundTacticsAllowed(Ffa(), CVAR_GET_FLOAT("competitive_game_mode")==1, live!=nullptr, live && live->value>0);
+}
+
 bool InitiatesChat(CCSBot *bot) {
  char *info=GET_INFO_BUFFER(bot->edict());const char *style=g_engfuncs.pfnInfoKeyValue(info,"_16c_style");
  if(style && !Q_strcmp(style,"quiet"))return false;
@@ -602,9 +610,10 @@ bool InitiatesChat(CCSBot *bot) {
  return role<2;
 }
 bool AnnouncePlan(CCSBot *bot,const char *line) {
+ if(!RoundTacticsAllowed())return false;
  if(InitiatesChat(bot)) {
   if(!Queue(bot,nullptr,true,line,true))return false;
-  State(bot).reply.planAnnouncement=true;return true;
+  State(bot).reply.planAnnouncement=true;State(bot).reply.captainReply=true;return true;
  }
  bot->Radio("%!MRAD_GO","#Go_go_go");return true;
 }
@@ -612,15 +621,15 @@ bool Speak(CCSBot *bot,CBasePlayer *listener,bool teamOnly,const char *line,bool
  return bot && (listener || InitiatesChat(bot)) && Queue(bot,listener,teamOnly,line,tactical);
 }
 bool ReactToSpree(CBasePlayer *player,int kills) {
- if(!Enabled() || Completed() || !roundChat.value || !textChat.value || !CombatTeam(player))return false;
+ if(!Enabled() || Completed() || !roundChat.value || !textChat.value || kills<3 || !CombatTeam(player))return false;
  int channel=Ffa()?0:int(player->m_iTeam);if(gpGlobals->time<nextSpreeChat[channel])return false;
  char name[64],line[128];CleanName(player,name);
  // Personal reactions are separate from the two tactical reporter roles.
  for(int pass=0;pass<2;++pass)for(int i=1;i<=gpGlobals->maxClients;++i){
   auto *p=Player(i);if(!p || !p->IsBot() || !p->IsAlive() || (!Ffa() && p->m_iTeam!=player->m_iTeam) || ((p==player)!=(pass==1)))continue;
   char *info=GET_INFO_BUFFER(p->edict());const char *style=g_engfuncs.pfnInfoKeyValue(info,"_16c_style");if(style && !Q_strcmp(style,"quiet"))continue;
-  if(p==player)Q_snprintf(line,sizeof(line),Ffa()?"%d in a row":"got %d this round",kills);
-  else if(!Ffa() && kills>=5)Q_snprintf(line,sizeof(line),"nice ace, %s!",name);
+  if(p==player)Q_snprintf(line,sizeof(line),!RoundTacticsAllowed()?"%d in a row":"got %d this round",kills);
+  else if(RoundTacticsAllowed() && kills==5)Q_snprintf(line,sizeof(line),"nice ace, %s!",name);
   else Q_snprintf(line,sizeof(line),"nice %dk, %s!",kills,name);
   if(Queue(static_cast<CCSBot *>(p),nullptr,!Ffa(),line,false)){nextSpreeChat[channel]=gpGlobals->time+8;return true;}
  }
@@ -875,6 +884,7 @@ void RoundRestart()
 	++roundSerial;
 	for (auto &state : slots) { state.reply.active = false; state.nextOrder = 0; state.nextPing = 0; }
 	for (auto &time : nextTeamPing) time = 0;
+ for(auto &time:nextSpreeChat)time=0;
 	for (auto &save : eco) save = false;
 }
 
@@ -945,6 +955,7 @@ void Frame()
 			reply.round, roundSerial, reply.speaker, Identity(bot), reply.listener, Identity(human))
 			|| (human && !CanHear(bot, human, reply.teamOnly)) || (reply.teamOnly && Ffa())
 			|| (reply.subjectSlot && !CompetitiveBotPolicy::SameRecipient(reply.subject, Identity(Player(reply.subjectSlot))))
+            || (reply.captainReply && !RoundTacticsAllowed())
             || (reply.tactical && Completed())) { reply.active = false; continue; }
 		if (reply.tactical && (bot->IsAttacking() || bot->GetTimeSinceAttacked() < 2.0f
 			|| (bot->pev->button & IN_ATTACK) || (human && (human->pev->button & IN_ATTACK)))) continue;
@@ -964,6 +975,7 @@ void Frame()
     if(!member || member==bot || !member->IsBot() || !member->IsAlive() || member->m_iTeam!=bot->m_iTeam)continue;
     auto *teammate=static_cast<CCSBot *>(member);
     if(!InitiatesChat(teammate) || !Queue(teammate,nullptr,true,ack,true))continue;
+    State(teammate).reply.captainReply=true;
     State(teammate).reply.subjectSlot=bot->entindex();State(teammate).reply.subject=Identity(bot);
     break;
    }
@@ -991,7 +1003,7 @@ void Chat(CBasePlayer *speaker, bool teamOnly, const char *text)
 	if (gpGlobals->time < humanState.nextOrder) return;
  TeamOrder order=parseTeamOrder(text);
  if(order==TeamOrder::None)for(int i=0;i<aliasCount;++i)if(!Q_strcmp(phrase,aliases[i].from)){order=parseTeamOrder(aliases[i].to);break;}
-	if (teamOrders.value && order != TeamOrder::None
+	if (teamOrders.value && RoundTacticsAllowed() && order != TeamOrder::None
 		&& CompetitiveBotPolicy::ActionsAllowed(Enabled(), Completed(), Ffa(), teamOnly, speaker->IsAlive(), true)) {
 		humanState.nextOrder = gpGlobals->time + 2.0f;
   humanCaptainUntil[speaker->m_iTeam]=gpGlobals->time+600;humanLeaderSlot[speaker->m_iTeam]=speaker->entindex();humanLeaderId[speaker->m_iTeam]=GETPLAYERUSERID(speaker->edict());plans[speaker->m_iTeam].active=false;

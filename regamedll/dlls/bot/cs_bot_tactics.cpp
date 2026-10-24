@@ -183,11 +183,11 @@ void TacticsEvent(GameEventType event,CBaseEntity *entity,CBaseEntity *other) {
  if(event==EVENT_PLAYER_DIED) {
   if(victim->IsBot())RememberHoldingAngle(static_cast<CCSBot *>(victim));
   auto *killer=other && other->IsPlayer()?static_cast<CBasePlayer *>(other):nullptr;
-  if(Ffa())sprees[victim->entindex()].pending.Died(true);
+  if(!RoundTacticsAllowed())sprees[victim->entindex()].pending.Died(true);
   if(killer && killer!=victim && (Ffa() || killer->m_iTeam!=victim->m_iTeam)) {
    auto &spree=sprees[killer->entindex()];int id=GETPLAYERUSERID(killer->edict());
    if(spree.id!=id || spree.team!=int(killer->m_iTeam)){spree=SpreeState {};spree.id=id;spree.team=int(killer->m_iTeam);}
-   spree.pending.Kill(gpGlobals->time,Ffa());
+   spree.pending.Kill(gpGlobals->time,!RoundTacticsAllowed());
    if(killer->IsBot()){auto *b=static_cast<CCSBot *>(killer);auto &s=Get(b);++s.kills;if(gpGlobals->time>=s.nextCover){s.nextCover=gpGlobals->time+5;if(!Busy(b) && !HasHumanOrder(b) && RANDOM_LONG(0,99)<25)b->TryToHide(b->GetLastKnownArea(),2,300,false,true);}auto *w=b->GetActiveWeapon();if(victim->m_bKilledByGrenade || (w && w->m_iId==WEAPON_KNIFE))Speak(b,nullptr,false,victim->m_bKilledByGrenade?"nade did the job":"knife work");}
    if(victim->IsBot() && !killer->IsBot() && gpGlobals->time>=nextBanter && !PingComplaint(static_cast<CCSBot *>(victim),true) && RANDOM_LONG(0,99)<30){nextBanter=gpGlobals->time+30;auto feeling=scoreFeeling(int(victim->pev->frags),victim->m_iDeaths);Speak(static_cast<CCSBot *>(victim),nullptr,false,victim->m_bKilledByGrenade?"that nade got me":(killer->m_pActiveItem && killer->m_pActiveItem->m_iId==WEAPON_KNIFE)?"got knifed, fair":feeling==ScoreFeeling::Struggling?"im getting cooked":feeling==ScoreFeeling::Confident?"still doing alright":"nice shot");}
   }

@@ -2,6 +2,10 @@
 #pragma once
 
 namespace CompetitiveBotPolicy {
+inline bool RoundTacticsAllowed(bool ffa, bool deathmatch, bool managed, bool live) {
+ return !ffa && !deathmatch && (!managed || live);
+}
+
 struct LifecycleChange {
 	bool ended, greet, rebuy;
 };

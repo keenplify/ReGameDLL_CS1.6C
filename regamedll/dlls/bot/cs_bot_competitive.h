@@ -14,6 +14,7 @@ void RegisterTacticsCVars();
 void ResetTactics(bool map);
 void UpdateTactics(CCSBot *bot);
 void UpdateSpreeReactions();
+bool RoundTacticsAllowed();
 bool ReactToSpree(CBasePlayer *player,int kills);
 void TacticsEvent(GameEventType event,CBaseEntity *entity,CBaseEntity *other);
 void ConfirmedDamage(CBasePlayer *victim,CBaseEntity *attacker,float amount);

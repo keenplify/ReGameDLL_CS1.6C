@@ -63,14 +63,24 @@ int main()
  CHECK(CompetitiveWatch::OpenScore(30,1,false)<0);
  CHECK(CompetitiveWatch::OpenScore(768,0,false)>CompetitiveWatch::OpenScore(300,1,false));
  CHECK(CompetitiveWatch::OpenScore(768,1,true)<0);
+ CHECK(CompetitiveBotPolicy::RoundTacticsAllowed(false,false,false,false)); // standalone
+ CHECK(CompetitiveBotPolicy::RoundTacticsAllowed(false,false,true,true)); // live match
+ CHECK(!CompetitiveBotPolicy::RoundTacticsAllowed(false,false,true,false)); // warmup
+ CHECK(!CompetitiveBotPolicy::RoundTacticsAllowed(true,false,false,true)); // engine FFA
+ CHECK(!CompetitiveBotPolicy::RoundTacticsAllowed(false,true,true,true)); // managed deathmatch
  CompetitiveSpree::Pending spree;
  spree.Kill(1,false);CHECK(!spree.Ready(2));
- spree.Kill(2,false);CHECK(!spree.Ready(2.5f));CHECK(spree.Ready(3.5f));
- spree.Retry(3);CHECK(spree.count==2 && !spree.Ready(3.2f));CHECK(spree.Ready(3.6f));
- spree.Kill(3.6f,false);CHECK(spree.count==3);spree.Delivered();CHECK(!spree.Ready(4));
- spree.Kill(4,true);spree.Died(true);CHECK(spree.kills==0 && spree.count==4);
- spree.Retry(15);CHECK(spree.count==0);
+ spree.Kill(2,false);CHECK(!spree.Ready(3.5f));CHECK(spree.count==0);
+ spree.Kill(3,false);CHECK(!spree.Ready(4));CHECK(spree.Ready(4.5f));
+ spree.Retry(4.5f);CHECK(spree.count==3 && !spree.Ready(4.8f));CHECK(spree.Ready(5));
+ spree.Kill(5,false);spree.Kill(5.1f,false);CHECK(spree.count==5);
+ spree.Delivered();spree.Kill(7,false);CHECK(!spree.Ready(9));
+ spree=CompetitiveSpree::Pending {};CHECK(spree.kills==0 && !spree.Ready(10));
+ for(int i=0;i<5;++i)spree.Kill(float(i),true);
+ spree.Died(true);CHECK(spree.kills==0 && spree.count==0 && !spree.Ready(6));
+ spree.Kill(7,true);CHECK(spree.kills==1 && spree.count==0);
  CompetitiveSpree::Pending dm;for(int i=0;i<10;++i)dm.Kill(float(i),true);CHECK(dm.count==10);
+ dm.Retry(20);CHECK(dm.count==0);
 	Lifecycle lifecycle;
 	CHECK(!lifecycle.Observe(false, false, 0).greet);
 	CHECK(lifecycle.Observe(false, true, 0).greet);
