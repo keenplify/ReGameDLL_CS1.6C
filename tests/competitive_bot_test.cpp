@@ -3,6 +3,7 @@
 #include "competitive_team_order.h"
 #include "competitive_team_allocation.h"
 #include "competitive_execution.h"
+#include "competitive_lock_in.h"
 #include "competitive_traffic.h"
 #include "competitive_watch.h"
 #include "competitive_spree.h"
@@ -47,7 +48,10 @@ int main()
  CHECK(ReplyDelay(90, 0.65f) < 3.1f);
  CHECK(ReplyDelay(90, 0.65f) == ReplyDelay(1000, 0.65f));
  CHECK(ReplyDelay(30, 0.25f) > ReplyDelay(2, 0.25f));
- for(int level=0;level<5;++level){CHECK(CompetitiveExecution::Reaction(level,true)>=.12f);CHECK(CompetitiveExecution::Get(level).tracking>0);if(level)CHECK(CompetitiveExecution::Get(level).error<CompetitiveExecution::Get(level-1).error);}
+ for(int level=0;level<5;++level){CHECK(CompetitiveExecution::Reaction(level,true)>=.108f-.0001f);CHECK(CompetitiveExecution::Get(level).tracking>0);if(level)CHECK(CompetitiveExecution::Get(level).error<CompetitiveExecution::Get(level-1).error);}
+ CHECK(std::abs(CompetitiveExecution::Reaction(0,false)-.405f)<.0001f);
+ CHECK(std::abs(CompetitiveExecution::Reaction(4,false)-.135f)<.0001f);
+ CHECK(std::abs(CompetitiveExecution::Reaction(4,true)-.108f)<.0001f);
  for(int level=0;level<5;++level){
   float cap=CompetitiveExecution::AimOffset(level,100000,true);
   CHECK(cap<=18 && cap>=.25f);
@@ -60,6 +64,24 @@ int main()
  CHECK(CompetitiveExecution::FireTolerance(1000,false,true)>CompetitiveExecution::FireTolerance(100,false,true));
  CHECK(CompetitiveExecution::FireTolerance(1000,true,false)>CompetitiveExecution::FireTolerance(1000,false,false));
  CHECK(CompetitiveExecution::FireTolerance(1000,false,true)<CompetitiveExecution::FireTolerance(1000,false,false));
+ for(int level=0;level<5;++level){
+  CHECK(CompetitiveLockIn::Duration(level,0)>=.08f);
+  CHECK(CompetitiveLockIn::Duration(level,1)<.29f);
+  if(level)CHECK(CompetitiveLockIn::Duration(level,.5f)>CompetitiveLockIn::Duration(level-1,.5f));
+  for(float roll:{0.0f,.5f,.999f}){
+   auto window=CompetitiveLockIn::Plan(level,0,roll,.5f,.5f);
+   CHECK(window.phase>=0 && window.phase<=2);
+   CHECK(window.start<window.end && window.end<=1.0f);
+   CHECK(!CompetitiveLockIn::Active(window,window.start-.001f));
+   CHECK(CompetitiveLockIn::Active(window,window.start));
+   CHECK(!CompetitiveLockIn::Active(window,window.end));
+  }
+ }
+ CHECK(CompetitiveLockIn::Plan(2,0,0,.5f,.5f).phase==0);
+ CHECK(CompetitiveLockIn::Plan(2,0,.5f,.5f,.5f).phase==1);
+ CHECK(CompetitiveLockIn::Plan(2,0,.999f,.5f,.5f).phase==2);
+ CHECK(CompetitiveLockIn::Plan(2,.6f,0,.5f,.5f).phase==2);
+ CHECK(CompetitiveLockIn::Plan(2,.9f,0,.5f,.5f).start>=.9f);
  CHECK(CompetitiveTraffic::Yields(3,2,1,2));CHECK(!CompetitiveTraffic::Yields(2,3,2,1));
  CHECK(CompetitiveTraffic::Yields(1,0,1,2));CHECK(!CompetitiveTraffic::Yields(0,1,2,1));
  CHECK(CompetitiveTraffic::Yields(2,2,8,7));CHECK(!CompetitiveTraffic::Yields(2,2,7,8));

@@ -79,6 +79,25 @@ methods were added. Linux and MSVC project source lists include the extension.
   profiles carry each roster personality. `bot_competitive_difficulty 0..4` selects
   five execution profiles; `-1` follows native difficulty. `bot_advanced_tactics 1`
   adds team economy, visible support, cover, saves, donations and post-plant regroup.
+- During a live match, each bot gets one random early, middle, or late lock-in
+  window. Higher `bot_competitive_difficulty` makes the window longer. While
+  active, reaction delay, aim error, and tracking interval are reduced; aim
+  skill rises slightly. FFA progress follows the highest current kill count
+  toward the score target; team progress follows completed engine rounds.
+  Progress never moves backward when the FFA leader leaves. The window ends
+  at its planned progress and resets for a new match, without changing the
+  bot's permanent difficulty, movement, recoil, or weapon rules.
+  Normal competitive reaction delay is 10% shorter at every difficulty; the
+  lock-in reaction boost applies after that adjustment.
+- FFA bots can see other protected bots. A bot's own protection ends when it
+  presses attack through ReGameDLL's `mp_respawn_immunity_force_unset 2` rule.
+  FFA does not send the team-style `nice 3k` spree reaction.
+- FFA bot-to-bot banter only follows recognizable duels: a revenge or repeat
+  kill, grenade or knife kill, or barely surviving. The killer speaks so living
+  players can hear it; a shared cooldown and chance gate prevent constant chat.
+  Quiet-style bots do not initiate these lines. The sidecar caches fixed
+  variants by FFA situation and occasionally refreshes them through DeepSeek
+  under a shared budget; 5v5 keeps separate teammate praise/team lines.
 - Learned witnessed holding-angle utility survives into the following round;
   planting smoke uses personally known approaches and native safety checks.
 - Optional aliases/callouts, radio captaincy, visible counts, damage estimates,

@@ -248,7 +248,7 @@ void AskAi(CCSBot *bot, CBasePlayer *human, bool teamOnly, const char *text, con
  CleanName(human,playerName);CleanName(bot,botName);CleanName(subject?subject:human,subjectName);
  int written = fprintf(f, "3\t%s\t%d\t%d\t%s\t%s\t%d\t%s\t%d\t%d\t%s\t%s\t%s\t%s\t%s\t%u-%d-%d-%d-%d\n", token,
   bot->entindex()-1, human?human->entindex()-1:subject?subject->entindex()-1:bot->entindex()-1,
-  teamOnly ? "team" : "all", Ffa() ? "ffa" : "teams", int(bot->m_iTeam), STRING(gpGlobals->mapname),
+  teamOnly ? "team" : "all", Ffa() ? "ffa" : CVAR_GET_FLOAT("competitive_game_mode")==2 ? "arena" : "teams", int(bot->m_iTeam), STRING(gpGlobals->mapname),
   int(bot->pev->health), bot->m_iAccount, clean, kind, playerName, botName, subjectName, roundSerial, GETPLAYERUSERID(bot->edict()), human?GETPLAYERUSERID(human->edict()):0,bot->IsAlive(),human?human->IsAlive():0);
  bool closed = fclose(f) == 0;
 #ifdef _WIN32
@@ -617,6 +617,7 @@ bool RoundTacticsAllowed() {
 bool InitiatesChat(CCSBot *bot) {
  char *info=GET_INFO_BUFFER(bot->edict());const char *style=g_engfuncs.pfnInfoKeyValue(info,"_16c_style");
  if(style && !Q_strcmp(style,"quiet"))return false;
+ if(Ffa())return true;
  int role=0;for(int i=1;i<bot->entindex();++i){auto *p=Player(i);if(p && p->IsBot() && p->m_iTeam==bot->m_iTeam)++role;}
  return role<2;
 }
@@ -631,8 +632,18 @@ bool AnnouncePlan(CCSBot *bot,const char *line,bool opening) {
 bool Speak(CCSBot *bot,CBasePlayer *listener,bool teamOnly,const char *line,bool tactical) {
  return bot && (listener || InitiatesChat(bot)) && Queue(bot,listener,teamOnly,line,tactical);
 }
+bool Banter(CCSBot *bot,CBasePlayer *subject,bool teamOnly,const char *line) {
+ if(!Speak(bot,nullptr,teamOnly,line))return false;
+ auto &reply=State(bot).reply;
+ if(subject){reply.subjectSlot=subject->entindex();reply.subject=Identity(subject);}
+ // Fixed, mode-specific templates are seeded into the sidecar cache for free.
+ // The queued line remains the fallback if no worker replies.
+ AskAi(bot,nullptr,teamOnly,line,"banter",subject);
+ return true;
+}
 bool ReactToSpree(CBasePlayer *player,int kills) {
- if(!Enabled() || Completed() || !roundChat.value || !textChat.value || kills<3 || !CombatTeam(player))return false;
+ // An opponent praising a 3k reads like team chat in free-for-all.
+ if(!Enabled() || Completed() || Ffa() || !roundChat.value || !textChat.value || kills<3 || !CombatTeam(player))return false;
  bool ace=IsRoundAce(player);
  int channel=Ffa()?0:int(player->m_iTeam);if(!ace && gpGlobals->time<nextSpreeChat[channel])return false;
  char name[64],line[128];CleanName(player,name);
@@ -643,7 +654,7 @@ bool ReactToSpree(CBasePlayer *player,int kills) {
   if(p==player)Q_snprintf(line,sizeof(line),!RoundTacticsAllowed()?"%d in a row":"got %d this round",kills);
   else if(ace)Q_snprintf(line,sizeof(line),"nice ace, %s!",name);
   else Q_snprintf(line,sizeof(line),"nice %dk, %s!",kills,name);
-  if(Queue(static_cast<CCSBot *>(p),nullptr,!Ffa(),line,false)){
+  if(Banter(static_cast<CCSBot *>(p),player,true,line)){
    auto &reply=State(p).reply;reply.aceReply=ace && p!=player;
    reply.subjectSlot=player->entindex();reply.subject=Identity(player);
    nextSpreeChat[channel]=gpGlobals->time+8;return true;
@@ -792,7 +803,7 @@ bool TargetAllowed(CBasePlayer *player)
 {
 	return player && player->IsAlive() && player->pev->takedamage != DAMAGE_NO
 		&& !(player->pev->flags & (FL_NOTARGET | FL_GODMODE)) && !(player->pev->effects & EF_NODRAW)
-		&& player->CSPlayer()->m_flSpawnProtectionEndTime <= gpGlobals->time;
+		&& (player->CSPlayer()->m_flSpawnProtectionEndTime <= gpGlobals->time || (Ffa() && player->IsBot()));
 }
 
 bool Pause(CCSBot *bot)

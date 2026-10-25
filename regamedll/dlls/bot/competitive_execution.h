@@ -9,7 +9,7 @@ inline Profile Get(int level) {
   {40,.27f,.10f,.42f,.20f,.55f},{20,.20f,.07f,.28f,.12f,.80f},{10,.15f,.045f,.18f,.06f,.95f}};
  return profiles[std::max(0,std::min(4,level))];
 }
-inline float Reaction(int level,bool early) {return std::max(.12f,Get(level).reaction*(early?.55f:1));}
+inline float Reaction(int level,bool early) {return std::max(.12f,Get(level).reaction*(early?.55f:1))*.9f;}
 inline float AimOffset(int level,float nativeError,bool settling) {
  static const float caps[]={18,14,10,7,4};
  auto p=Get(level);float error=std::max(0.0f,nativeError)*p.error+(settling?5*p.error:0);

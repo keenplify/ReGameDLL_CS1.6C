@@ -2,6 +2,7 @@
 #include "precompiled.h"
 #include "cs_bot_competitive.h"
 #include "competitive_execution.h"
+#include "competitive_lock_in.h"
 #include "competitive_enemy_damage.h"
 #include "competitive_score_reaction.h"
 #include "competitive_spree.h"
@@ -12,9 +13,12 @@ cvar_t level={"bot_competitive_difficulty","-1",FCVAR_SERVER,0,nullptr};
 cvar_t tactics={"bot_advanced_tactics","1",FCVAR_SERVER,0,nullptr};
 struct HitMemory {int id=0;EnemyDamageEstimate estimate;};
 struct State {
- int id=0,targetId=0,targetSlot=0,kills=0,milestone=0,lastHealth=100;
+ int id=0,targetId=0,targetSlot=0,kills=0,milestone=0,lastHealth=100,lastKillerUserid=0;
  bool early=false,head=false,hasSample=false,saving=false,reloading=false;
+ bool lockPlanned=false,lockActive=false;
+ CompetitiveLockIn::Window lockWindow {};
  float recoilUntil=0,acquired=0,nextSample=0,nextTick=0,nextCover=0,nextSupport=0,nextPlant=0,avoidUntil=0;
+ float nextLockCheck=0;
  float orderUntil=0,streakDue=0;
  Vector sampled {0,0,0},avoid {0,0,0};
  HitMemory hits[MAX_CLIENTS+1];
@@ -25,10 +29,36 @@ SpreeState sprees[MAX_CLIENTS+1];
 struct TeamState {bool economy=false,eco=false,donated=false,saveCall=false;float buyAt=0,donationDue=0;int donorSlot=0,donorId=0,recipientSlot=0,recipientId=0,donationPhase=0;};
 TeamState teams[4];
 float nextBanter=0;
+float nextProgressCheck=0,matchProgress=0;
 CBasePlayer *Player(int i) {auto *p=i>0 && i<=gpGlobals->maxClients?UTIL_PlayerByIndex(i):nullptr;return p && p->IsPlayer() && !p->IsDormant()?static_cast<CBasePlayer *>(p):nullptr;}
 State &Get(CCSBot *b) {auto &s=states[b->entindex()];int id=GETPLAYERUSERID(b->edict());if(s.id!=id){s=State {};s.id=id;}return s;}
 int Level() {if(level.value>=0)return int(level.value);return int(cv_bot_difficulty.value)*4/3;}
 bool Ffa() {return CSGameRules()->IsFreeForAll();}
+float Progress() {
+ if(gpGlobals->time<nextProgressCheck)return matchProgress;
+ nextProgressCheck=gpGlobals->time+.25f;
+ const float configuredTarget=CVAR_GET_FLOAT("competitive_score_target");
+ const float target=configuredTarget>=2?configuredTarget:(Ffa()?50.0f:13.0f);
+ if(Ffa()) {
+  float leader=0;
+  for(int i=1;i<=gpGlobals->maxClients;++i){auto *p=Player(i);if(p && p->pev->frags>leader)leader=p->pev->frags;}
+  matchProgress=std::max(matchProgress,std::min(1.0f,leader/target));
+ } else matchProgress=std::max(matchProgress,std::min(1.0f,float(std::max(0,CSGameRules()->m_iTotalRoundsPlayed))/std::max(1.0f,2*target-1)));
+ return matchProgress;
+}
+bool LockedIn(CCSBot *b) {
+ if(!Enabled() || Completed() || CVAR_GET_FLOAT("competitive_match_live")<=0)return false;
+ auto &s=Get(b);
+ if(gpGlobals->time<s.nextLockCheck)return s.lockActive;
+ s.nextLockCheck=gpGlobals->time+.2f;
+ const float progress=Progress();
+ if(!s.lockPlanned) {
+  s.lockWindow=CompetitiveLockIn::Plan(Level(),progress,RANDOM_FLOAT(0,1),RANDOM_FLOAT(0,1),RANDOM_FLOAT(0,1));
+  s.lockPlanned=true;
+ }
+ s.lockActive=CompetitiveLockIn::Active(s.lockWindow,progress);
+ return s.lockActive;
+}
 bool Busy(CCSBot *b) {return b->IsDefusingBomb() || b->IsEscapingFromBomb() || b->m_bIsVIP || b->IsCarryingBomb()
  || b->GetTask()==CCSBot::PLANT_BOMB || b->GetTask()==CCSBot::RESCUE_HOSTAGES || IsManagingGrenade(b);}
 bool Path(CCSBot *b,const Vector &point) {
@@ -41,6 +71,7 @@ CCSBot *Captain(TeamName team) {CCSBot *best=nullptr;for(int i=1;i<=gpGlobals->m
 }
 void RegisterTacticsCVars(){CVAR_REGISTER(&level);CVAR_REGISTER(&tactics);}
 void ResetTactics(bool map) {
+ if(map){nextProgressCheck=0;matchProgress=0;}
  for(auto &s:states){if(map)s=State {};else {s.recoilUntil=0;s.kills=0;s.targetId=0;s.hasSample=false;s.nextTick=0;s.streakDue=0;s.orderUntil=0;s.saving=false;s.avoidUntil=0;for(auto &hit:s.hits)hit=HitMemory {};}}
  for(auto &spree:sprees)spree=SpreeState {};
  for(auto &t:teams){t=TeamState {};t.buyAt=gpGlobals->time+3;}
@@ -56,15 +87,15 @@ void Notice(CCSBot *b,CBasePlayer *target) {
   auto p=CompetitiveExecution::Get(Level());s.early=RANDOM_LONG(0,99)<p.early;s.head=RANDOM_FLOAT(0,1)<p.skill*.65f;
  }
 }
-float ExecutionSkill(CCSBot *b){return Enabled()?CompetitiveExecution::Get(Level()).skill:b->GetProfile()->GetSkill();}
-float ExecutionReaction(CCSBot *b){return Enabled()?CompetitiveExecution::Reaction(Level(),Get(b).early):b->GetProfile()->GetReactionTime();}
+float ExecutionSkill(CCSBot *b){if(!Enabled())return b->GetProfile()->GetSkill();float skill=CompetitiveExecution::Get(Level()).skill;return LockedIn(b)?std::min(.99f,skill+.08f):skill;}
+float ExecutionReaction(CCSBot *b){if(!Enabled())return b->GetProfile()->GetReactionTime();float reaction=CompetitiveExecution::Reaction(Level(),Get(b).early);return LockedIn(b)?std::max(.09f,reaction*.8f):reaction;}
 bool AimAtHead(CCSBot *b){Notice(b,b->GetEnemy());return !Enabled() || Get(b).head;}
 void SampleAim(CCSBot *b,Vector &aim){
  if(!Enabled() || !b->IsEnemyVisible())return;Notice(b,b->GetEnemy());auto &s=Get(b);
- if(!s.hasSample || gpGlobals->time>=s.nextSample){s.sampled=aim;s.hasSample=true;s.nextSample=gpGlobals->time+CompetitiveExecution::Get(Level()).tracking;}
+ if(!s.hasSample || gpGlobals->time>=s.nextSample){s.sampled=aim;s.hasSample=true;s.nextSample=gpGlobals->time+CompetitiveExecution::Get(Level()).tracking*(LockedIn(b)?.8f:1.0f);}
  aim=s.sampled;
 }
-float AimError(CCSBot *b,float nativeError){if(!Enabled())return nativeError;auto &s=Get(b);auto p=CompetitiveExecution::Get(Level());return CompetitiveExecution::AimOffset(Level(),nativeError,s.early && gpGlobals->time-s.acquired<p.settle);}
+float AimError(CCSBot *b,float nativeError){if(!Enabled())return nativeError;auto &s=Get(b);auto p=CompetitiveExecution::Get(Level());float error=CompetitiveExecution::AimOffset(Level(),nativeError,s.early && gpGlobals->time-s.acquired<p.settle);return LockedIn(b)?std::max(.25f,error*.8f):error;}
 bool EarlyFire(CCSBot *b){if(!Enabled() || b->IsUsingSniperRifle() || b->IsUsingKnife())return false;auto &s=Get(b);return s.early && gpGlobals->time-s.acquired>=ExecutionReaction(b) && gpGlobals->time-s.acquired<CompetitiveExecution::Get(Level()).settle;}
 bool RecoverRecoil(CCSBot *b) {
  if(!Enabled() || !b->IsEnemyVisible() || b->IsUsingPistol() || b->IsUsingSniperRifle() || b->IsUsingKnife() || b->IsUsingGrenade())return false;
@@ -139,7 +170,7 @@ void UpdateTactics(CCSBot *b) {
  for(int i=1;i<=gpGlobals->maxClients;++i){auto &h=s.hits[i];auto *p=Player(i);if(h.estimate.ready(gpGlobals->time) && p && p->IsAlive() && GETPLAYERUSERID(p->edict())==h.id){char line[128];Q_snprintf(line,sizeof(line),"%s %s",STRING(p->pev->netname),h.estimate.label());if(Speak(b,nullptr,true,line,true))h.estimate.reportedTier=h.estimate.tier();}}
 
  int threshold=Ffa()?40:20;
- if(b->pev->frags>=threshold && int(b->pev->frags)/10>s.milestone && gpGlobals->time>=nextBanter){s.milestone=int(b->pev->frags)/10;nextBanter=gpGlobals->time+30;Speak(b,nullptr,!Ffa(),b->m_iDeaths>b->pev->frags+2?"still getting cooked":"feeling good today");}
+ if(b->pev->frags>=threshold && int(b->pev->frags)/10>s.milestone && gpGlobals->time>=nextBanter){s.milestone=int(b->pev->frags)/10;const char *line=Ffa()?(b->m_iDeaths>b->pev->frags+2?"still getting cooked":"feeling good today"):(b->m_iDeaths>b->pev->frags+2?"need to regroup":"we're finding picks");if(Banter(b,nullptr,!Ffa(),line))nextBanter=gpGlobals->time+30;}
  if(CSGameRules()->IsFreezePeriod() || CSGameRules()->m_iRoundWinStatus!=WINSTATUS_NONE || Busy(b))return;
  bool pressure=b->GetTimeSinceAttacked()<1.5f && b->pev->health<s.lastHealth-15;
  s.lastHealth=int(b->pev->health);
@@ -196,13 +227,34 @@ void TacticsEvent(GameEventType event,CBaseEntity *entity,CBaseEntity *other) {
  if(event==EVENT_PLAYER_DIED) {
   if(victim->IsBot())RememberHoldingAngle(static_cast<CCSBot *>(victim));
   auto *killer=other && other->IsPlayer()?static_cast<CBasePlayer *>(other):nullptr;
-  if(!RoundTacticsAllowed())sprees[victim->entindex()].pending.Died(true);
+  if(!Ffa() && !RoundTacticsAllowed())sprees[victim->entindex()].pending.Died(true);
   if(killer && killer!=victim && (Ffa() || killer->m_iTeam!=victim->m_iTeam)) {
-   auto &spree=sprees[killer->entindex()];int id=GETPLAYERUSERID(killer->edict());
-   if(spree.id!=id || spree.team!=int(killer->m_iTeam)){spree=SpreeState {};spree.id=id;spree.team=int(killer->m_iTeam);}
-   spree.victims[victim->entindex()]=GETPLAYERUSERID(victim->edict());
-   spree.pending.Kill(gpGlobals->time,!RoundTacticsAllowed());
-   if(killer->IsBot()){auto *b=static_cast<CCSBot *>(killer);auto &s=Get(b);++s.kills;if(gpGlobals->time>=s.nextCover){s.nextCover=gpGlobals->time+5;if(!Busy(b) && !HasHumanOrder(b) && RANDOM_LONG(0,99)<25)b->TryToHide(b->GetLastKnownArea(),2,300,false,true);}auto *w=b->GetActiveWeapon();if(victim->m_bKilledByGrenade || (w && w->m_iId==WEAPON_KNIFE))Speak(b,nullptr,false,victim->m_bKilledByGrenade?"nade did the job":"knife work");}
+   if(!Ffa()) {
+    auto &spree=sprees[killer->entindex()];int id=GETPLAYERUSERID(killer->edict());
+    if(spree.id!=id || spree.team!=int(killer->m_iTeam)){spree=SpreeState {};spree.id=id;spree.team=int(killer->m_iTeam);}
+    spree.victims[victim->entindex()]=GETPLAYERUSERID(victim->edict());
+    spree.pending.Kill(gpGlobals->time,!RoundTacticsAllowed());
+   }
+   if(killer->IsBot()){auto *b=static_cast<CCSBot *>(killer);auto &s=Get(b);++s.kills;if(gpGlobals->time>=s.nextCover){s.nextCover=gpGlobals->time+5;if(!Busy(b) && !HasHumanOrder(b) && RANDOM_LONG(0,99)<25)b->TryToHide(b->GetLastKnownArea(),2,300,false,true);}auto *w=b->GetActiveWeapon();if(!Ffa() && (victim->m_bKilledByGrenade || (w && w->m_iId==WEAPON_KNIFE)))Banter(b,victim,true,victim->m_bKilledByGrenade?"nade did the job":"knife work");}
+   if(Ffa() && victim->IsBot()) {
+    auto *deadBot=static_cast<CCSBot *>(victim);
+    auto &dead=Get(deadBot);
+    const int killerId=GETPLAYERUSERID(killer->edict());
+    const int victimId=GETPLAYERUSERID(victim->edict());
+    if(killer->IsBot() && gpGlobals->time>=nextBanter && RANDOM_LONG(0,99)<45) {
+     auto *liveBot=static_cast<CCSBot *>(killer);
+     auto &live=Get(liveBot);
+     auto *weapon=liveBot->GetActiveWeapon();
+     const char *line=nullptr;
+     if(live.lastKillerUserid==victimId)line="got you back";
+     else if(dead.lastKillerUserid==killerId)line="caught you again";
+     else if(victim->m_bKilledByGrenade)line="nade found you";
+     else if(weapon && weapon->m_iId==WEAPON_KNIFE)line="knife got you";
+     else if(killer->pev->health<=20)line="you almost had me";
+     if(line && Banter(liveBot,victim,false,line))nextBanter=gpGlobals->time+35;
+    }
+    dead.lastKillerUserid=killerId;
+   }
    if(victim->IsBot() && !killer->IsBot() && gpGlobals->time>=nextBanter && !PingComplaint(static_cast<CCSBot *>(victim),true) && RANDOM_LONG(0,99)<30){nextBanter=gpGlobals->time+30;auto feeling=scoreFeeling(int(victim->pev->frags),victim->m_iDeaths);Speak(static_cast<CCSBot *>(victim),nullptr,false,victim->m_bKilledByGrenade?"that nade got me":(killer->m_pActiveItem && killer->m_pActiveItem->m_iId==WEAPON_KNIFE)?"got knifed, fair":feeling==ScoreFeeling::Struggling?"im getting cooked":feeling==ScoreFeeling::Confident?"still doing alright":"nice shot");}
   }
   if(!Ffa())for(int i=1;i<=gpGlobals->maxClients;++i){auto *p=Player(i);if(!p || !p->IsBot() || !p->IsAlive() || p->m_iTeam!=victim->m_iTeam)continue;auto *b=static_cast<CCSBot *>(p);if((b->pev->origin-victim->pev->origin).LengthSquared()>800*800 || !b->IsVisible(victim,true))continue;auto &s=Get(b);s.avoid=victim->pev->origin;s.avoidUntil=gpGlobals->time+15;s.nextSupport=gpGlobals->time+1.5f;}

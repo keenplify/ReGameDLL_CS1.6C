@@ -34,6 +34,7 @@ bool HasHumanCaptain(TeamName team);
 bool AnnouncePlan(CCSBot *bot,const char *line,bool opening=false);
 bool InitiatesChat(CCSBot *bot);
 bool Speak(CCSBot *bot,CBasePlayer *listener,bool teamOnly,const char *line,bool tactical=false);
+bool Banter(CCSBot *bot,CBasePlayer *subject,bool teamOnly,const char *line);
 bool Tactical(CCSBot *bot,const char *trigger,const char *radio="%!MRAD_AFFIRM");
 bool RequestedDrop(CCSBot *bot,CBasePlayer *human,const char *requested);
 void ProtectHumanOrder(CCSBot *bot,float duration=12);
