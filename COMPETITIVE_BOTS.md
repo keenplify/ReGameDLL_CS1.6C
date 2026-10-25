@@ -94,7 +94,8 @@ methods were added. Linux and MSVC project source lists include the extension.
   FFA does not send the team-style `nice 3k` spree reaction.
 - FFA bot-to-bot banter only follows recognizable duels: a revenge or repeat
   kill, grenade or knife kill, or barely surviving. The killer speaks so living
-  players can hear it; a shared cooldown and chance gate prevent constant chat.
+  players can hear it; banter is suppressed unless a human is playing. A shared
+  cooldown and chance gate prevent constant chat.
   Quiet-style bots do not initiate these lines. The sidecar caches fixed
   variants by FFA situation and occasionally refreshes them through DeepSeek
   under a shared budget; 5v5 keeps separate teammate praise/team lines.

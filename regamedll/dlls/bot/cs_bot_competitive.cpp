@@ -633,6 +633,9 @@ bool Speak(CCSBot *bot,CBasePlayer *listener,bool teamOnly,const char *line,bool
  return bot && (listener || InitiatesChat(bot)) && Queue(bot,listener,teamOnly,line,tactical);
 }
 bool Banter(CCSBot *bot,CBasePlayer *subject,bool teamOnly,const char *line) {
+ bool humanPresent=false;
+ for(int i=1;i<=gpGlobals->maxClients;++i){auto *p=Player(i);if(p && !p->IsBot() && CombatTeam(p)){humanPresent=true;break;}}
+ if(!humanPresent)return false;
  if(!Speak(bot,nullptr,teamOnly,line))return false;
  auto &reply=State(bot).reply;
  if(subject){reply.subjectSlot=subject->entindex();reply.subject=Identity(subject);}
