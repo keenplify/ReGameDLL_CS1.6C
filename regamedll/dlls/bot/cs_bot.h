@@ -588,6 +588,8 @@ public:
 	void ForceRun(float duration);										// force the bot to run if it moves for the given duration
 	void Wiggle();														// random movement, for getting un-stuck
 
+	bool IsHeadOnFriend(CBasePlayer *other, const Vector *goalPos) const;
+	bool YieldToFriend(const Vector *goalPos);
 	bool IsFriendInTheWay(const Vector *goalPos) const;					// return true if a friend is between us and the given position
 	void FeelerReflexAdjustment(Vector *goalPosition);					// do reflex avoidance movements if our "feelers" are touched
 

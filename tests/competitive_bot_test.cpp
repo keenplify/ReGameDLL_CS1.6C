@@ -3,6 +3,7 @@
 #include "competitive_team_order.h"
 #include "competitive_team_allocation.h"
 #include "competitive_execution.h"
+#include "competitive_traffic.h"
 #include "competitive_watch.h"
 #include "competitive_spree.h"
 #include "competitive_enemy_damage.h"
@@ -47,6 +48,30 @@ int main()
  CHECK(ReplyDelay(90, 0.65f) == ReplyDelay(1000, 0.65f));
  CHECK(ReplyDelay(30, 0.25f) > ReplyDelay(2, 0.25f));
  for(int level=0;level<5;++level){CHECK(CompetitiveExecution::Reaction(level,true)>=.12f);CHECK(CompetitiveExecution::Get(level).tracking>0);if(level)CHECK(CompetitiveExecution::Get(level).error<CompetitiveExecution::Get(level-1).error);}
+ for(int level=0;level<5;++level){
+  float cap=CompetitiveExecution::AimOffset(level,100000,true);
+  CHECK(cap<=18 && cap>=.25f);
+  CHECK(CompetitiveExecution::AimOffset(level,20,true)<=cap);
+  CHECK(CompetitiveExecution::AimOffset(level,20,false)<=CompetitiveExecution::AimOffset(level,20,true));
+ }
+ CHECK(CompetitiveExecution::AimOffset(0,100000,true)==18);
+ CHECK(CompetitiveExecution::AimOffset(4,100000,true)==4);
+ CHECK(CompetitiveExecution::FireTolerance(1000,false,true)>.999f);
+ CHECK(CompetitiveExecution::FireTolerance(1000,false,true)>CompetitiveExecution::FireTolerance(100,false,true));
+ CHECK(CompetitiveExecution::FireTolerance(1000,true,false)>CompetitiveExecution::FireTolerance(1000,false,false));
+ CHECK(CompetitiveExecution::FireTolerance(1000,false,true)<CompetitiveExecution::FireTolerance(1000,false,false));
+ CHECK(CompetitiveTraffic::Yields(3,2,1,2));CHECK(!CompetitiveTraffic::Yields(2,3,2,1));
+ CHECK(CompetitiveTraffic::Yields(1,0,1,2));CHECK(!CompetitiveTraffic::Yields(0,1,2,1));
+ CHECK(CompetitiveTraffic::Yields(2,2,8,7));CHECK(!CompetitiveTraffic::Yields(2,2,7,8));
+ CHECK(CompetitiveTraffic::HeadOn(70,5,0,-1));
+ CHECK(!CompetitiveTraffic::HeadOn(70,5,0,1)); // convoy
+ CHECK(!CompetitiveTraffic::HeadOn(-70,5,0,-1)); // behind us
+ CHECK(!CompetitiveTraffic::HeadOn(70,40,0,-1)); // adjacent route
+ CHECK(!CompetitiveTraffic::HeadOn(70,0,40,-1)); // separate floors
+ OpeningPlanGate opening;CHECK(opening.available(2));CHECK(!opening.available(9));
+ opening.chosen=true;CHECK(!opening.available(3));CHECK(!opening.available(55));
+ CHECK(opening.deliver(5));CHECK(!opening.deliver(11));
+ opening=OpeningPlanGate {};CHECK(opening.available(2));
  CHECK(CompetitiveExecution::ShouldSave(1,4,1000,true,false,false,20));
  CHECK(!CompetitiveExecution::ShouldSave(1,4,1000,true,true,false,20));
  CHECK(!CompetitiveExecution::ShouldSave(1,4,1000,true,false,true,20));

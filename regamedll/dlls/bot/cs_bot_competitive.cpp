@@ -42,6 +42,7 @@ struct Reply {
 	bool teamOnly = false;
 	bool tactical = false;
 	bool planAnnouncement = false;
+ unsigned planRevision = 0;
  bool captainReply = false;
  bool aceReply = false;
 	int listenerSlot = 0, subjectSlot = 0;
@@ -389,6 +390,8 @@ struct CaptainPlan {
 };
 CaptainPlan plans[4];
 unsigned planRevision=0;
+OpeningPlanGate openingPlans[4];
+float captainRoundStarted=-1;
 void ResetCaptains() {for(auto &p:plans) {p=CaptainPlan {};p.ready=gpGlobals->time+3;}}
 bool PlanMember(CCSBot *bot) {
  return bot->IsAlive() && !bot->IsDefusingBomb() && !bot->IsEscapingFromBomb() && !bot->m_bIsVIP
@@ -482,15 +485,21 @@ void MaintainCaptains() {
  if(!RoundTacticsAllowed()){ResetCaptains();return;}
  if(!captainMode.value || Completed() || CSGameRules()->m_iRoundWinStatus!=WINSTATUS_NONE
     || TheCSBots()->IsBombPlanted() || TheCSBots()->GetScenario()!=CCSBotManager::SCENARIO_DEFUSE_BOMB) return;
+ if(!CSGameRules()->IsFreezePeriod() && captainRoundStarted<0)captainRoundStarted=gpGlobals->time;
  for(auto team:{TERRORIST,CT}) {
   auto &plan=plans[team];
   if(CSGameRules()->IsFreezePeriod()) {plan.ready=gpGlobals->time+2;continue;}
   auto *leader=Player(plan.leaderSlot);
   if(plan.active && (!leader || !leader->IsAlive() || leader->m_iTeam!=team || GETPLAYERUSERID(leader->edict())!=plan.leaderId)) {
-   plan=CaptainPlan {};plan.ready=gpGlobals->time+2;
+   // Keep routes and applied revisions. A casualty changes who leads, not the plan.
+   auto *replacement=ElectCaptain(team);
+   plan.leaderSlot=replacement?replacement->entindex():0;
+   plan.leaderId=replacement?GETPLAYERUSERID(replacement->edict()):0;
+   plan.human=false;leader=replacement;
   }
   if(!plan.active) {
-   if(gpGlobals->time<plan.ready || HasHumanCaptain(team) || gpGlobals->time-lastHumanChat[team]<12)continue;
+   if(!openingPlans[team].available(gpGlobals->time-captainRoundStarted)
+      || gpGlobals->time<plan.ready || HasHumanCaptain(team) || gpGlobals->time-lastHumanChat[team]<3)continue;
    auto *captain=ElectCaptain(team);if(!captain)continue;
    int alive=0;for(int i=1;i<=gpGlobals->maxClients;++i) {auto *p=Player(i);if(p && p->IsAlive() && p->m_iTeam==team)++alive;}
    if(alive<2)continue;
@@ -517,7 +526,8 @@ void MaintainCaptains() {
    if(!accepted) {plan.ready=gpGlobals->time+5;continue;}
    if(!line[0])formatTeamAllocation(split,line,sizeof(line));
    if(playingTime)plan.slowUntil=gpGlobals->time+12;
-   AnnouncePlan(captain,line);
+   openingPlans[team].chosen=true;
+   AnnouncePlan(captain,line,true);
    leader=captain;
   }
   if(gpGlobals->time<plan.nextDrive)continue;
@@ -610,11 +620,11 @@ bool InitiatesChat(CCSBot *bot) {
  int role=0;for(int i=1;i<bot->entindex();++i){auto *p=Player(i);if(p && p->IsBot() && p->m_iTeam==bot->m_iTeam)++role;}
  return role<2;
 }
-bool AnnouncePlan(CCSBot *bot,const char *line) {
+bool AnnouncePlan(CCSBot *bot,const char *line,bool opening) {
  if(!RoundTacticsAllowed())return false;
  if(InitiatesChat(bot)) {
   if(!Queue(bot,nullptr,true,line,true))return false;
-  State(bot).reply.planAnnouncement=true;State(bot).reply.captainReply=true;return true;
+  State(bot).reply.planAnnouncement=opening;State(bot).reply.planRevision=plans[bot->m_iTeam].revision;State(bot).reply.captainReply=true;return true;
  }
  bot->Radio("%!MRAD_GO","#Go_go_go");return true;
 }
@@ -866,6 +876,8 @@ void Reset()
  for(auto &time:lastHumanChat)time=-100;
 	ResetGrenades(true);
 	ResetCaptains();
+ captainRoundStarted=-1;for(auto &gate:openingPlans)gate=OpeningPlanGate {};
+ ResetTraffic();
  ResetTactics(true);
  for(auto &gate:tacticalGate)gate=TacticalCommsGate {};
  for(auto &time:humanCaptainUntil)time=0;
@@ -883,9 +895,11 @@ void RoundRestart()
 {
 	ResetGrenades();
 	ResetCaptains();
+ captainRoundStarted=-1;for(auto &gate:openingPlans)gate=OpeningPlanGate {};
+ ResetTraffic();
  ResetTactics(false);
  for(auto &time:humanCaptainUntil)time=0;
- for(auto &time:lastHumanChat)time=gpGlobals->time;
+ for(auto &time:lastHumanChat)time=-100;
  for(auto &watch:watches)watch=WatchOrder {};
 	++roundSerial;
 	for (auto &state : slots) { state.reply.active = false; state.nextOrder = 0; state.nextPing = 0; }
@@ -961,6 +975,8 @@ void Frame()
 			reply.round, roundSerial, reply.speaker, Identity(bot), reply.listener, Identity(human))
 			|| (human && !CanHear(bot, human, reply.teamOnly)) || (reply.teamOnly && Ffa())
 			|| (reply.subjectSlot && !CompetitiveBotPolicy::SameRecipient(reply.subject, Identity(Player(reply.subjectSlot))))
+            || (reply.planAnnouncement && (!bot->IsAlive() || !openingPlans[bot->m_iTeam].deliver(gpGlobals->time-captainRoundStarted)
+                || reply.planRevision!=plans[bot->m_iTeam].revision || plans[bot->m_iTeam].leaderId!=GETPLAYERUSERID(bot->edict())))
             || (reply.aceReply && !IsRoundAce(Player(reply.subjectSlot)))
             || (reply.captainReply && !RoundTacticsAllowed())
             || (reply.tactical && Completed())) { reply.active = false; continue; }

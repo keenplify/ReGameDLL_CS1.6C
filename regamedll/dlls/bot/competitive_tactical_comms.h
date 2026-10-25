@@ -49,3 +49,11 @@ struct TacticalCommsGate {
       if (event >= 0) { used[event] = true; events[event] = now; }
    }
 };
+
+// Automatic route allocations belong to the round opening, never a captain's
+// mid-round replacement. Explicit human orders use their own acknowledgement.
+struct OpeningPlanGate {
+ bool chosen=false;
+ bool available(float elapsed) const { return !chosen && elapsed>=0 && elapsed<=8; }
+ bool deliver(float elapsed) const { return elapsed>=0 && elapsed<=10; }
+};

@@ -27,6 +27,9 @@
 */
 
 #include "precompiled.h"
+#include "cs_bot_competitive.h"
+#include "competitive_traffic.h"
+#include "competitive_policy.h"
 
 // Determine actual path positions bot will move between along the path
 bool CCSBot::ComputePathPositions()
@@ -1093,6 +1096,109 @@ float CCSBot::GetApproximateFallDamage(float height) const
 	return damage;
 }
 
+namespace {
+struct PassingState {
+ int user=0,peer=0,peerUser=0;
+ float started=0,until=0,nextProbe=0;
+ Vector point {0,0,0}, direction {0,0,0};
+};
+PassingState passing[MAX_CLIENTS+1];
+unsigned TrafficPriority(CBasePlayer *player) {
+ if(player->IsBot()) {
+  auto *bot=static_cast<CCSBot *>(player);
+  if(bot->IsDefusingBomb() || bot->IsEscapingFromBomb() || bot->GetTask()==CCSBot::PLANT_BOMB
+     || bot->GetTask()==CCSBot::RESCUE_HOSTAGES || bot->m_bIsVIP)return 1;
+ }
+ return TheCSBots()->GetPlayerPriority(player);
+}
+}
+
+void CompetitiveBots::ResetTraffic() { for(auto &state:passing)state=PassingState {}; }
+
+bool CCSBot::IsHeadOnFriend(CBasePlayer *other,const Vector *goalPos) const
+{
+ if(!other || !other->IsAlive() || other==this || BotRelationship(other)==BOT_ENEMY)return false;
+ Vector mine=*goalPos-pev->origin;mine.z=0;
+ if(mine.NormalizeInPlace()<1)return false;
+ Vector theirs=other->pev->velocity;theirs.z=0;
+ if(other->IsBot()) {
+  auto *bot=static_cast<CCSBot *>(other);
+  if(bot->m_pathLength<2 || bot->IsAttacking() || bot->IsUsingLadder())return false;
+  theirs=bot->m_goalPosition-other->pev->origin;theirs.z=0;
+ }
+ if(theirs.NormalizeInPlace()<1)return false;
+ Vector delta=other->pev->origin-pev->origin;
+ return CompetitiveTraffic::HeadOn(DotProduct(delta,mine),delta.x*mine.y-delta.y*mine.x,
+                                  delta.z,DotProduct(mine,theirs));
+}
+
+// Give one player right of way before contact. Keep the chosen shoulder for a
+// short lease so two bots cannot alternate between waiting and pushing.
+bool CCSBot::YieldToFriend(const Vector *goalPos)
+{
+ auto &state=passing[entindex()];
+ int user=GETPLAYERUSERID(edict());float now=gpGlobals->time;
+ if(state.user!=user || state.started>now){state=PassingState {};state.user=user;}
+ if(!CompetitiveBots::Enabled() || !IsAlive() || IsAttacking() || IsEnemyVisible()
+    || GetTimeSinceAttacked()<1 || IsUsingLadder() || IsOnLadder() || IsJumping() || IsNearJump()
+    || !(pev->flags&FL_ONGROUND) || pev->waterlevel>1 || IsDefusingBomb() || IsEscapingFromBomb()
+    || GetTask()==PLANT_BOMB || GetTask()==RESCUE_HOSTAGES) {state.until=0;return false;}
+ auto safe=[&](const Vector &point) {
+  TraceResult tr;
+  UTIL_TraceHull(pev->origin,point,dont_ignore_monsters,IsCrouching()?head_hull:human_hull,edict(),&tr);
+  if(!CompetitiveBotPolicy::ClearTrace(tr.flFraction,tr.fStartSolid,tr.fAllSolid))return false;
+  Vector ray=point-pev->origin;int steps=Q_max(1,int(ray.Length2D()/12)+1);
+  float lastFloor=GetFeetZ();
+  for(int step=1;step<=steps;++step) {
+   Vector probe=pev->origin+ray*(float(step)/steps);
+   UTIL_TraceLine(probe+Vector(0,0,18),probe-Vector(0,0,90),ignore_monsters,edict(),&tr);
+   if(tr.fStartSolid || tr.fAllSolid || tr.flFraction>=1 || tr.vecPlaneNormal.z<.7f
+      || Q_abs(tr.vecEndPos.z-lastFloor)>StepHeight)return false;
+   lastFloor=tr.vecEndPos.z;
+  }
+  return true;
+ };
+ auto *peer=UTIL_PlayerByIndex(state.peer);
+ bool active=now<state.until && peer && peer->IsAlive() && GETPLAYERUSERID(peer->edict())==state.peerUser
+  && BotRelationship(peer)!=BOT_ENEMY && (peer->pev->origin-pev->origin).LengthSquared()<180*180
+  && (state.point-pev->origin).LengthSquared()<160*160
+  && DotProduct(peer->pev->origin-pev->origin,state.direction)>-24;
+ if(!active) {
+  state.until=0;
+  if(now<state.nextProbe)return false;
+  state.nextProbe=now+.15f;
+  peer=nullptr;float closest=112*112;
+  for(int i=1;i<=gpGlobals->maxClients;++i) {
+   auto *other=UTIL_PlayerByIndex(i);
+   if(!UTIL_IsValidPlayer(other) || !IsHeadOnFriend(other,goalPos)
+      || !CompetitiveTraffic::Yields(TrafficPriority(this),TrafficPriority(other),entindex(),i))continue;
+   float distance=(other->pev->origin-pev->origin).LengthSquared();
+   if(distance<closest){closest=distance;peer=other;}
+  }
+  if(!peer)return false;
+  Vector forward=*goalPos-pev->origin;forward.z=0;forward.NormalizeInPlace();
+  Vector side(-forward.y,forward.x,0);
+  const float back[]={16,16,48,48,96,96,64};
+  const float lateral[]={64,-64,48,-48,48,-48,0};
+  bool found=false;
+  for(int i=0;i<7;++i) {
+   Vector point=pev->origin-forward*back[i]+side*lateral[i];
+   if(safe(point)){state.point=point;found=true;break;}
+  }
+  if(!found)return false;
+  state.started=now;state.until=now+2;state.peer=peer->entindex();
+  state.peerUser=GETPLAYERUSERID(peer->edict());state.direction=forward;
+ }
+ ClearMovement();m_avoid=nullptr;m_isWaitingBehindFriend=false;
+ ResetStuckMonitor();m_areaEnteredTimestamp=now;
+ if((state.point-pev->origin).Length2D()>10) {
+  // Another player may enter the shoulder after it was selected.
+  if(!safe(state.point)){state.until=0;return false;}
+  MoveTowardsPosition(&state.point);
+ }
+ return true;
+}
+
 // Return true if a friend is between us and the given position
 bool CCSBot::IsFriendInTheWay(const Vector *goalPos) const
 {
@@ -1129,6 +1235,12 @@ bool CCSBot::IsFriendInTheWay(const Vector *goalPos) const
 			continue;
 
 		if (pPlayer == this)
+			continue;
+
+		// Only the yielding bot waits in a head-on encounter. Native waiting
+		// must not make the player with right of way stop as well.
+		if (CompetitiveBots::Enabled() && IsHeadOnFriend(pPlayer,goalPos)
+		    && !CompetitiveTraffic::Yields(TrafficPriority(const_cast<CCSBot *>(this)),TrafficPriority(pPlayer),entindex(),i))
 			continue;
 
 		// compute vector from us to our friend
@@ -1479,6 +1591,8 @@ CCSBot::PathResult CCSBot::UpdatePathMovement(bool allowSpeedChange)
 		UTIL_DrawBeamPoints(adjustedGoal, adjustedGoal + Vector(0, 0, 50), 1, 255, 0, 255);
 		UTIL_DrawBeamPoints(pev->origin, adjustedGoal + Vector(0, 0, 50), 1, 255, 0, 255);
 	}
+
+	if (YieldToFriend(&m_goalPosition)) return PROGRESSING;
 
 	// dont use adjustedGoal, as it can vary wildly from the feeler adjustment
 	if (!IsAttacking() && IsFriendInTheWay(&m_goalPosition))

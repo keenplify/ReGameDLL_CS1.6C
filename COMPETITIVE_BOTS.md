@@ -420,3 +420,33 @@ respawn-mode kills are a 5k, not an ace.
 Ace credit records each enemy identity per round; teammates finishing the remaining
 opponents cannot turn another player's 3k/4k into an ace. Queued ace praise rechecks
 the enemy roster and deaths before delivery.
+
+### Passing, aim bounds, and opening plans
+
+Native round navigation now resolves head-on teammate encounters before contact.
+One bot keeps right of way using the existing human/objective/bot priority, with
+a stable slot tie-break. The other selects a shoulder or backstep checked with
+a player hull and floor samples, then holds that choice briefly while the peer
+passes. The right-of-way bot bypasses the mutual polite-wait condition. Ladder,
+jump, combat, planting, defusing and rescue controllers retain precedence.
+Passing leases reset each round/map and validate connection identities.
+
+Competitive aim error multipliers are reduced to 0.45/0.32/0.20/0.12/0.06 by
+execution tier, with world-unit offset caps of 18/14/10/7/4. Tracking samples are
+shorter. Competitive firing checks pitch and yaw in a distance-dependent cone;
+the old fixed ~20-degree early-fire exception is removed. Weapon spread and
+recoil physics are unchanged; opting out preserves stock aiming.
+
+Automatic route allocation is chosen once per team in the first eight seconds
+after freeze time. Queued allocation speech expires after ten seconds and is
+invalidated by a different plan or captain. Captain casualties transfer leadership
+without reassigning routes or repeating a split. Explicit human orders may still
+redirect the team during the round. Economy announcements do not generate route
+acknowledgements.
+
+Verification includes policy tests for asymmetric traffic priority, aim bounds,
+firing cones and opening deadlines, plus an isolated native de_dust2 fixture:
+a yielding bot selected a clear 64-unit shoulder, its peer did not also wait,
+a replacement captain preserved the plan revision/routes, and a deliberately
+late allocation was not delivered. This is not an exhaustive test of every
+custom-map bottleneck.

@@ -701,6 +701,9 @@
     <ClInclude Include="..\dlls\bot\competitive_execution.h">
       <Filter>dlls\bot</Filter>
     </ClInclude>
+    <ClInclude Include="..\dlls\bot\competitive_traffic.h">
+      <Filter>dlls\bot</Filter>
+    </ClInclude>
     <ClInclude Include="..\dlls\bot\competitive_spree.h">
       <Filter>dlls\bot</Filter>
     </ClInclude>

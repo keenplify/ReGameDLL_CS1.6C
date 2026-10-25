@@ -28,6 +28,7 @@
 
 #include "precompiled.h"
 #include "bot/cs_bot_competitive.h"
+#include "bot/competitive_execution.h"
 
 // Fire our active weapon towards our current enemy
 // NOTE: Aiming our weapon is handled in RunBotUpkeep()
@@ -77,7 +78,17 @@ void CCSBot::FireWeaponAtEnemy()
 			// aiming tolerance depends on how close the target is - closer targets subtend larger angles
 			real_t aimTolerance = Q_cos(Q_atan(halfSize / rangeToEnemy));
 
-			if (onTarget > aimTolerance || (CompetitiveBots::EarlyFire(this) && onTarget > 0.94f))
+			if (CompetitiveBots::Enabled())
+			{
+				Vector toward=m_aimSpot-EyePosition();
+				float range=toward.NormalizeInPlace();
+				float pitch=pev->v_angle.x*float(M_PI/180.0);
+				Vector forward(Q_cos(pitch)*Q_cos(yaw),Q_cos(pitch)*Q_sin(yaw),-Q_sin(pitch));
+				onTarget=DotProduct(toward,forward);
+				aimTolerance=CompetitiveExecution::FireTolerance(range,IsUsingSniperRifle(),CompetitiveBots::EarlyFire(this));
+			}
+
+			if (onTarget > aimTolerance)
 			{
 				bool doAttack;
 
