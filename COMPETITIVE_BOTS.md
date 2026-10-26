@@ -470,3 +470,28 @@ a yielding bot selected a clear 64-unit shoulder, its peer did not also wait,
 a replacement captain preserved the plan revision/routes, and a deliberately
 late allocation was not delivered. This is not an exhaustive test of every
 custom-map bottleneck.
+
+### Sustained-fire regression (2026-10-26)
+
+The competitive three-dimensional firing gate measured `m_aimSpot` from
+`EyePosition()`, while `RunBotUpkeep()` steers to that same aim point from
+`pev->origin`. The eye-height difference created a permanent pitch error once
+the bot finished turning, so an opening shot could be followed by indefinite
+inaction. The gate now uses the same body-origin reference as the aim controller.
+Visibility, friendly-fire checks, firing-cone widths, aim error, weapon spread,
+and recoil behavior are unchanged.
+
+`tests/engine/sustained_fire_native.sma` keeps a live, armed observer and a
+visible enemy 350 units apart on an isolated `de_dust2` server. It never resets
+the encounter, counts actual clip decrements and damage, and requires additional
+shots after ten seconds. With the packaged pre-fix DLL, the rifle fired zero
+shots over twenty seconds. The corrected Linux x86 DLL fired 90 M4A1 shots
+(47 after ten seconds, 56 damage events); a USP variant fired 36 shots
+(18 after ten seconds, 8 damage events). These are controlled regression results,
+not accuracy or difficulty targets.
+
+Compile the fixture with the server's AMXX compiler and ReAPI includes, and load
+it only in an isolated server: it places bots, changes server settings, and quits
+after 28 seconds. Change `FIXTURE_WEAPON` and `FIXTURE_WEAPON_ID` for another
+weapon and enable its bot weapon category. A passing run prints
+`SUSTAINED_FIRE PASS repeated ranged fire and hits`.

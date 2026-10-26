@@ -80,7 +80,10 @@ void CCSBot::FireWeaponAtEnemy()
 
 			if (CompetitiveBots::Enabled())
 			{
-				Vector toward=m_aimSpot-EyePosition();
+				// RunBotUpkeep steers toward m_aimSpot relative to pev->origin.
+				// Use that same reference here: eye height adds a permanent pitch
+				// error that can reject a fully settled aim after the first shot.
+				Vector toward=m_aimSpot-pev->origin;
 				float range=toward.NormalizeInPlace();
 				float pitch=pev->v_angle.x*float(M_PI/180.0);
 				Vector forward(Q_cos(pitch)*Q_cos(yaw),Q_cos(pitch)*Q_sin(yaw),-Q_sin(pitch));
