@@ -530,3 +530,28 @@ other carried types, preserving the smoke preference for covering a planter.
 No safety radii, visible-gunfight restrictions or projectile physics are relaxed.
 Policy tests cover fallback and preference order; actual buy/throw frequency still
 requires an in-game playtest. This does not add free deathmatch grenade equipment.
+
+## Coordinated Arena/FFA breaks
+
+The backend core can select one bot to say `brb`, pause for 120–180 seconds,
+then say `back`. A shared user-ID/absolute-expiry lease prevents native and
+YaPB providers from independently pausing different bots. The core enforces
+a server-wide 5–8 minute cooldown, keeps only this bot out of native idle kick,
+and leaves the bot damageable. This provider pauses AI/input and queued chatter
+only for a matching, live, Arena/FFA lease; expiry is never extended on respawn.
+Missing/invalid/stale leases leave ordinary behavior intact. Ship with the updated
+`competitive_bot_away.inc` core. `competitive_bot_away 0` disables the feature.
+See the backend's `src/amxx/BOT_AWAY.md` for policy and runtime verification.
+# Arena spacing
+
+In `competitive_game_mode 2` (Arena), idle bots hunt independently instead of
+automatically following a teammate. New hunt destinations favor separation from
+living teammates and their active path endpoints. The selector samples at most
+24 nav areas, scores nearby usable lanes, and tries at most four native paths.
+Clearance is capped at 700 units so remote corners do not always win; small random
+variation keeps routes from repeating. Existing path recovery remains the fallback.
+
+Combat/noise investigation and explicit human orders retain priority. Objective
+carriers are excluded. Automatic team-support regrouping is skipped in Arena;
+other game modes retain their existing behavior. This is navigation selection,
+not a change to movement physics, aiming, recoil, or weapon balance.

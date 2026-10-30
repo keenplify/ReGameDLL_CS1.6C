@@ -4,6 +4,7 @@
 class CCSBot;
 class CBasePlayer;
 class CBaseEntity;
+class CNavArea;
 
 // State is external to CCSBot/CCSBotManager to preserve the public class layout.
 namespace CompetitiveBots {
@@ -39,6 +40,8 @@ bool Tactical(CCSBot *bot,const char *trigger,const char *radio="%!MRAD_AFFIRM")
 bool RequestedDrop(CCSBot *bot,CBasePlayer *human,const char *requested);
 void ProtectHumanOrder(CCSBot *bot,float duration=12);
 bool HasHumanOrder(CCSBot *bot);
+bool ArenaSpreadEnabled();
+CNavArea *ArenaHuntArea(CCSBot *bot);
 void RegisterGrenadeCVars();
 void ResetGrenades(bool map=false);
 void RememberHoldingAngle(CCSBot *bot);
@@ -65,6 +68,7 @@ void UpdateLatency(const edict_t *recipient);
 bool Enabled();
 bool Completed();
 bool Pause(CCSBot *bot);
+bool SimulatedAway(CCSBot *bot);
 bool Saving(CCSBot *bot);
 bool TargetAllowed(CBasePlayer *player);
 }

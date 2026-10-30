@@ -27,6 +27,7 @@
 */
 
 #include "precompiled.h"
+#include "../cs_bot_competitive.h"
 
 // range for snipers to select a hiding spot
 const float sniperHideRange = 2000.0f;
@@ -105,6 +106,15 @@ void IdleState::OnUpdate(CCSBot *me)
 	const float offenseSniperCampChance = 10.0f;
 
 	// if we were following someone, continue following them
+	// Arena bots choose separate roaming lanes unless a human requested support.
+	if (CompetitiveBots::ArenaSpreadEnabled() && !CompetitiveBots::HasHumanOrder(me)
+		&& !me->IsCarryingBomb() && !me->m_bIsVIP && !me->GetHostageEscortCount())
+	{
+		me->StopFollowing();
+		me->Hunt();
+		return;
+	}
+
 	if (me->IsFollowing())
 	{
 		me->ContinueFollowing();

@@ -3,6 +3,7 @@
 #include "precompiled.h"
 #include "cs_bot_competitive.h"
 #include "competitive_policy.h"
+#include "competitive_away.h"
 #include "competitive_ping.h"
 #include "../../../query/query_packet.h"
 #ifndef _WIN32
@@ -174,7 +175,7 @@ bool CanHear(CBasePlayer *bot, CBasePlayer *human, bool teamOnly)
 
 bool Queue(CCSBot *bot, CBasePlayer *human, bool teamOnly, const char *line, bool tactical = false)
 {
-	if (!textChat.value || !CombatTeam(bot) || (teamOnly && Ffa())) return false;
+	if (!textChat.value || !CombatTeam(bot) || SimulatedAway(bot) || (teamOnly && Ffa())) return false;
 	auto &state = State(bot);
 	if (state.reply.active || gpGlobals->time < state.nextChat) return false;
 	if (human && !CanHear(bot, human, teamOnly)) return false;
@@ -809,9 +810,39 @@ bool TargetAllowed(CBasePlayer *player)
 		&& (player->CSPlayer()->m_flSpawnProtectionEndTime <= gpGlobals->time || (Ffa() && player->IsBot()));
 }
 
+bool SimulatedAway(CCSBot *bot)
+{
+ if (!bot || !bot->IsBot()) return false;
+ // Cvars persist across map changes. Cache bindings; when the core is absent,
+ // retry at most once a second and tolerate the map clock restarting at zero.
+ static cvar_t *owner = nullptr, *until = nullptr, *mode = nullptr;
+ static cvar_t *enabled = nullptr, *live = nullptr, *completed = nullptr;
+ static float retryAt = 0;
+ const float now = gpGlobals->time;
+ if (!owner) {
+  if (retryAt > now && retryAt - now <= 1.0f) return false;
+  owner = CVAR_GET_POINTER("competitive_bot_away_userid");
+  retryAt = now + 1.0f;
+ }
+ if (!owner || owner->value <= 0) return false;
+ const int userid = GETPLAYERUSERID(bot->edict());
+ if (owner->value != static_cast<float>(userid)) return false;
+ if (!until) until = CVAR_GET_POINTER("competitive_bot_away_until");
+ if (!mode) mode = CVAR_GET_POINTER("competitive_game_mode");
+ if (!enabled) enabled = CVAR_GET_POINTER("competitive_bot_away");
+ if (!live) live = CVAR_GET_POINTER("competitive_match_live");
+ if (!completed) completed = CVAR_GET_POINTER("competitive_match_completed");
+ return until && mode && enabled && live && completed && simulatedAwayLease(now,
+    until->value, owner->value, userid, mode->value, enabled->value > 0,
+    live->value > 0, completed->value > 0);
+}
+
 bool Pause(CCSBot *bot)
 {
-	if (!Completed()) return false;
+ if (!Completed() && !SimulatedAway(bot)) return false;
+ bot->ResetStuckMonitor();
+ bot->pev->button = bot->pev->oldbuttons = 0;
+ bot->pev->impulse = 0;
 	CancelGrenade(bot);
 	bot->StopRapidFire(); bot->ClearMovement();
 	return true;
@@ -975,6 +1006,7 @@ void Frame()
 		auto *p = Player(i);
 		if (!p || !p->IsBot()) continue;
 		auto *bot = static_cast<CCSBot *>(p);
+  if (SimulatedAway(bot)) { State(bot).reply.active = false; continue; }
   auto &watch=watches[i];
   if(watch.id==GETPLAYERUSERID(bot->edict()) && watch.expires>gpGlobals->time && bot->IsAlive() && !bot->IsEnemyVisible() && (watch.goal-bot->pev->origin).LengthSquared()<150*150) {
    bot->TryToHide(bot->GetLastKnownArea(),watch.expires-gpGlobals->time,150,true,true);watch.expires=0;

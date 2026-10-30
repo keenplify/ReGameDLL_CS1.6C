@@ -27,6 +27,7 @@
 */
 
 #include "precompiled.h"
+#include "../cs_bot_competitive.h"
 
 // Begin the hunt
 void HuntState::OnEnter(CCSBot *me)
@@ -170,7 +171,8 @@ void HuntState::OnUpdate(CCSBot *me)
 	// if our path fails, pick a new one
 	if (me->GetLastKnownArea() == m_huntArea || me->UpdatePathMovement() != CCSBot::PROGRESSING)
 	{
-		m_huntArea = nullptr;
+		m_huntArea = CompetitiveBots::ArenaHuntArea(me);
+		if (m_huntArea) return;
 		float oldest = 0.0f;
 
 		int areaCount = 0;

@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "competitive_policy.h"
+#include "competitive_away.h"
+#include "competitive_arena_spread.h"
 #include "competitive_team_order.h"
 #include "competitive_team_allocation.h"
 #include "competitive_execution.h"
@@ -17,6 +19,26 @@ int main()
 {
 	int failures = 0;
 #define CHECK(value) do { if (!(value)) { std::fprintf(stderr, "line %d: %s\n", __LINE__, #value); ++failures; } } while (0)
+ CHECK(arenaSpreadAllowed(2,true,false,false));
+ CHECK(!arenaSpreadAllowed(0,true,false,false));
+ CHECK(!arenaSpreadAllowed(1,true,false,false));
+ CHECK(!arenaSpreadAllowed(2,false,false,false));
+ CHECK(!arenaSpreadAllowed(2,true,true,false));
+ CHECK(!arenaSpreadAllowed(2,true,false,true));
+ CHECK(arenaSpreadScore(500,700,0)>arenaSpreadScore(50,400,1));
+ CHECK(arenaSpreadScore(500,600,0)>arenaSpreadScore(500,2000,0));
+ CHECK(arenaSpreadScore(700,1000,0)==arenaSpreadScore(5000,1000,0));
+ CHECK(simulatedAwayLease(100,280,42,42,1,true,true,false));
+ CHECK(simulatedAwayLease(100,279,42,42,2,true,true,false));
+ CHECK(!simulatedAwayLease(100,281,42,42,1,true,true,false));
+ CHECK(!simulatedAwayLease(280,280,42,42,1,true,true,false));
+ CHECK(!simulatedAwayLease(100,200,42,43,1,true,true,false));
+ CHECK(!simulatedAwayLease(100,200,42,42,0,true,true,false));
+ CHECK(!simulatedAwayLease(100,200,42,42,1,false,true,false));
+ CHECK(!simulatedAwayLease(100,200,42,42,1,true,false,false));
+ CHECK(!simulatedAwayLease(100,200,42,42,1,true,true,true));
+ CHECK(!simulatedAwayLease(100,NAN,42,42,1,true,true,false));
+ CHECK(!simulatedAwayLease(100,INFINITY,42,42,1,true,true,false));
 	CHECK(parseTeamOrder("guys, rotate to B now") == TeamOrder::RotateB);
 	CHECK(parseTeamOrder("bot, follow me") == TeamOrder::FollowMe);
 	CHECK(parseTeamOrder("can you jump?") == TeamOrder::Jump);

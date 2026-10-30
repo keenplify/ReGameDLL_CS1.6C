@@ -6,6 +6,7 @@
 #include "competitive_enemy_damage.h"
 #include "competitive_score_reaction.h"
 #include "competitive_spree.h"
+#include "competitive_arena_spread.h"
 #include <cmath>
 namespace CompetitiveBots {
 namespace {
@@ -79,6 +80,41 @@ void ResetTactics(bool map) {
 }
 void ProtectHumanOrder(CCSBot *b,float seconds){Get(b).orderUntil=gpGlobals->time+seconds;}
 bool HasHumanOrder(CCSBot *b){return gpGlobals->time<Get(b).orderUntil;}
+bool ArenaSpreadEnabled() {return Enabled() && CVAR_GET_FLOAT("competitive_game_mode")==2;}
+CNavArea *ArenaHuntArea(CCSBot *b) {
+ if(!arenaSpreadAllowed(CVAR_GET_FLOAT("competitive_game_mode"),Enabled(),Busy(b),HasHumanOrder(b))
+   || !b->GetLastKnownArea() || b->IsEnemyVisible() || b->IsAttacking())return nullptr;
+ // Reservoir sample bounds scoring/path work even on large navigation meshes.
+ CNavArea *candidates[24]={};float scores[24]={};int seen=0,count=0;
+ for(auto *area:TheNavAreaList) {
+  float travel=(*area->GetCenter()-b->pev->origin).Length2D();
+  if(area==b->GetLastKnownArea() || travel<200 || travel>2800)continue;
+  const Extent *extent=area->GetExtent();
+  if(extent->hi.x-extent->lo.x<70 || extent->hi.y-extent->lo.y<70)continue;
+  ++seen;int slot=count<24?count++:RANDOM_LONG(0,seen-1);
+  if(slot<24)candidates[slot]=area;
+ }
+ for(int n=0;n<count;++n) {
+  const Vector &point=*candidates[n]->GetCenter();float clearance=700;
+  for(int i=1;i<=gpGlobals->maxClients;++i) {
+   auto *p=Player(i);if(!p || p==b || !p->IsAlive() || p->m_iTeam!=b->m_iTeam)continue;
+   clearance=std::min(clearance,(point-p->pev->origin).Length2D());
+   if(p->IsBot()) {
+    auto *peer=static_cast<CCSBot *>(p);
+    if(peer->HasPath())clearance=std::min(clearance,(point-peer->GetPathEndpoint()).Length2D());
+   }
+  }
+  scores[n]=arenaSpreadScore(clearance,(point-b->pev->origin).Length2D(),RANDOM_FLOAT(0,1));
+ }
+ for(int attempt=0;attempt<4;++attempt) {
+  int best=-1;
+  for(int n=0;n<count;++n)if(candidates[n] && (best<0 || scores[n]>scores[best]))best=n;
+  if(best<0)break;
+  auto *area=candidates[best];candidates[best]=nullptr;
+  if(b->ComputePath(area,nullptr,FASTEST_ROUTE))return area;
+ }
+ return nullptr; // Keep native recovery when no sampled route is usable.
+}
 void Notice(CCSBot *b,CBasePlayer *target) {
  if(!Enabled() || !target || !TargetAllowed(target) || !b->IsVisible(target,true))return;
  auto &s=Get(b);int id=GETPLAYERUSERID(target->edict());
@@ -189,7 +225,7 @@ void UpdateTactics(CCSBot *b) {
  bool pressure=b->GetTimeSinceAttacked()<1.5f && b->pev->health<s.lastHealth-15;
  s.lastHealth=int(b->pev->health);
  if((b->IsReloading() || pressure) && !HasHumanOrder(b) && gpGlobals->time>=s.nextCover){s.nextCover=gpGlobals->time+5;if(b->TryToRetreat())Tactical(b,b->IsReloading()?"Reloading. Cover me.":"Need backup.","%!MRAD_BACKUP");}
- if(Ffa())return;
+ if(Ffa() || ArenaSpreadEnabled())return;
  if(!HasHumanOrder(b) && !b->IsEnemyVisible() && !b->IsAttacking() && gpGlobals->time>=s.nextPlant && TheCSBots()->IsBombPlanted()) {
   s.nextPlant=gpGlobals->time+4;const Vector *bomb=b->GetGameState()->GetBombPosition();
   if(b->m_iTeam==TERRORIST && bomb && (*bomb-b->pev->origin).LengthSquared()>700*700 && TheCSBots()->GetBombTimeLeft()>10) {
