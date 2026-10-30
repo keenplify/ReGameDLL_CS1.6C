@@ -495,3 +495,38 @@ it only in an isolated server: it places bots, changes server settings, and quit
 after 28 seconds. Change `FIXTURE_WEAPON` and `FIXTURE_WEAPON_ID` for another
 weapon and enable its bot weapon category. A passing run prints
 `SUSTAINED_FIRE PASS repeated ranged fire and hits`.
+
+### MMR-scaled opening accuracy (CS 1.6 native bots)
+
+Instance-owned BotProfile.db profiles accept `CompetitiveMMR`; the backend writes
+each roster bot's MMR, with unknown/invalid values represented by -1.
+Rated bots receive stable lateral opening aim error with correction time
+`clamp(2.6 * 0.5^((MMR - 1000) / 1000), 0.35, 3.2)` seconds. Each additional
+100 MMR reduces time by about 6.7% until a bound is reached: 1000 takes 2.6s,
+1500 about 1.84s, 2000 takes 1.3s, and 3000 takes 0.65s. This is a gameplay tuning
+curve, not a claim that MMR measures skill linearly. There is no 1300 cutoff.
+Ordinary guns can fire up to 12 degrees off their sampled aim point during this
+window after the existing reaction gate. Snipers retain their precise firing gate
+but receive the opening offset. Knives and grenades do not receive the offset.
+Bots prefer body aim while correcting, then resume their existing head-aim roll.
+A new target or more than half a second without a visible observation restarts
+correction. Visibility, shields, protected players and friendly-fire checks remain.
+Bullets can hit during correction; this is not a damage immunity timer.
+Unknown MMR preserves existing execution. Movement/navigation is unchanged.
+
+Requires both the updated native game DLL and backend profile generation for new
+instances. Existing live instances are unchanged. Policy tests and a Linux x86
+build validate code behavior; in-game balance and Windows runtime remain unverified.
+
+### Managed grenade availability and fallback
+
+With smart grenades enabled, bots attempt to buy a grenade every buy round when
+none is carried, after their existing gun/ammo/armor purchases. Normal purchase
+costs, buy zones, buy time and grenade restrictions still apply. The stock 33%
+purchase chance remains for unmanaged bots. Managed bots may buy flashes with
+human teammates because the coordinator checks teammate positions before throws.
+A carried grenade rejected by distance or trajectory checks now falls back to
+other carried types, preserving the smoke preference for covering a planter.
+No safety radii, visible-gunfight restrictions or projectile physics are relaxed.
+Policy tests cover fallback and preference order; actual buy/throw frequency still
+requires an in-game playtest. This does not add free deathmatch grenade equipment.

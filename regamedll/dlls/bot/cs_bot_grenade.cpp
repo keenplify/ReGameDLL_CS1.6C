@@ -180,7 +180,8 @@ bool UpdateGrenade(CCSBot *bot) {
   m.weapon=0;
   for(int choice:choices) if(Carried(bot,choice)) {m.weapon=choice;break;}
   if(Carried(bot,WEAPON_SMOKEGRENADE) && !CSGameRules()->IsFreeForAll())for(int i=1;i<=gpGlobals->maxClients;++i){auto *p=Opponent(i);if(!p || p==bot || p->m_iTeam!=bot->m_iTeam || !p->IsAlive() || !bot->IsVisible(p,true))continue;auto *item=p->m_pActiveItem?static_cast<CBasePlayerWeapon *>(p->m_pActiveItem->GetWeaponPtr()):nullptr;if(item && item->m_iId==WEAPON_C4 && static_cast<CC4 *>(item)->m_bStartedArming){m.weapon=WEAPON_SMOKEGRENADE;break;}}
-  if(!m.weapon || !Safe(bot,m.position,m.weapon)) return false;
+  m.weapon=ChooseCarried(m.weapon,choices,[&](int choice){return Carried(bot,choice) && Safe(bot,m.position,choice);});
+  if(!m.weapon)return false;
   m.target=m.position;m.landing=m.target;m.stage=1;m.started=gpGlobals->time;m.expires=gpGlobals->time+3.5f;
   nextPlan=gpGlobals->time+.25f;
   bot->StopAttacking();bot->StopAiming();bot->StopRapidFire();bot->ClearPrimaryAttack();
@@ -192,12 +193,20 @@ bool UpdateGrenade(CCSBot *bot) {
  if(m.stage==1) {
   // Stand still before solving: movement velocity contributes to actual native throws.
   if(bot->pev->velocity.Length2D()>35 && gpGlobals->time<m.started+.5f) return true;
-  if(bot->pev->velocity.Length2D()>35 || !FindThrow(bot,m)) {
+  const int choices[]={WEAPON_HEGRENADE,WEAPON_FLASHBANG,WEAPON_SMOKEGRENADE};
+  const int preferred=m.weapon;
+  const int selected=bot->pev->velocity.Length2D()>35?0:ChooseCarried(preferred,choices,[&](int choice){
+   if(!Carried(bot,choice) || !Safe(bot,m.target,choice))return false;
+   m.weapon=choice;
+   return FindThrow(bot,m);
+  });
+  if(!selected) {
    if(debug.value>0) ALERT(at_console,"[Bot utility] no safe trajectory bot=%d\n",bot->entindex());
    Cancel(bot,m);return false;
   }
   if(debug.value>0) ALERT(at_console,"[Bot utility] plan bot=%d weapon=%d age=%.2f target=(%.0f %.0f %.0f) landing=(%.0f %.0f %.0f)\n",
    bot->entindex(),m.weapon,gpGlobals->time-m.seen,m.target.x,m.target.y,m.target.z,m.landing.x,m.landing.y,m.landing.z);
+  m.weapon=selected;
   bot->SelectItem(STRING(Carried(bot,m.weapon)->pev->classname));
   m.stage=2;
  }

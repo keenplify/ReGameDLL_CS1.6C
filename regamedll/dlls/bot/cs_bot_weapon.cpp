@@ -88,7 +88,7 @@ void CCSBot::FireWeaponAtEnemy()
 				float pitch=pev->v_angle.x*float(M_PI/180.0);
 				Vector forward(Q_cos(pitch)*Q_cos(yaw),Q_cos(pitch)*Q_sin(yaw),-Q_sin(pitch));
 				onTarget=DotProduct(toward,forward);
-				aimTolerance=CompetitiveExecution::FireTolerance(range,IsUsingSniperRifle(),CompetitiveBots::EarlyFire(this));
+				aimTolerance=CompetitiveExecution::OpeningFireTolerance(range,IsUsingSniperRifle(),CompetitiveBots::EarlyFire(this),GetProfile()->GetCompetitiveMmr());
 			}
 
 			if (onTarget > aimTolerance)

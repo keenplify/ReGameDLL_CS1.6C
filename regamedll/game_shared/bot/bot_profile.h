@@ -79,7 +79,9 @@ public:
 		m_teams = BOT_TEAM_ANY;
 		m_voiceBank = 0;
 		m_prefersSilencer = false;
+		m_competitiveMmr = -1;
 	}
+	int GetCompetitiveMmr() const { return m_competitiveMmr; }
 	const char *GetName() const { return m_name; }
 	float GetAggression() const { return m_aggression; }
 	float GetSkill()      const { return m_skill; }
@@ -123,6 +125,7 @@ private:
 	enum BotProfileTeamType m_teams;
 	bool m_prefersSilencer;
 	int m_voiceBank;
+	int m_competitiveMmr; // -1: unmanaged/unknown; preserve existing execution
 };
 
 inline bool BotProfile::IsDifficulty(BotDifficultyType diff) const
@@ -134,6 +137,9 @@ inline void BotProfile::Inherit(const BotProfile *parent, const BotProfile *base
 {
 	if (parent->m_aggression != baseline->m_aggression)
 		m_aggression = parent->m_aggression;
+
+	if (parent->m_competitiveMmr != baseline->m_competitiveMmr)
+		m_competitiveMmr = parent->m_competitiveMmr;
 
 	if (parent->m_skill != baseline->m_skill)
 		m_skill = parent->m_skill;

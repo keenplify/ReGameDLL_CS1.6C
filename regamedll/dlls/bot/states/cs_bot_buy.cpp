@@ -91,7 +91,8 @@ void BuyState::OnEnter(CCSBot *me)
 
 	if (TheCSBots()->AllowGrenades())
 	{
-		m_buyGrenade = (RANDOM_FLOAT(0.0f, 100.0f) < 33.3f) ? true : false;
+		// Managed utility validates trajectories and teammate safety before throwing.
+		m_buyGrenade = CompetitiveBots::SmartGrenades() || RANDOM_FLOAT(0.0f, 100.0f) < 33.3f;
 	}
 	else
 	{
@@ -497,9 +498,9 @@ void BuyState::OnUpdate(CCSBot *me)
 			// buy a grenade if we wish, and we don't already have one
 			if (m_buyGrenade && !me->HasGrenade())
 			{
-				if (UTIL_IsTeamAllBots(me->m_iTeam))
+				if (CompetitiveBots::SmartGrenades() || UTIL_IsTeamAllBots(me->m_iTeam))
 				{
-					// only allow Flashbangs if everyone on the team is a bot (dont want to blind our friendly humans)
+					// Managed throws check human teammates too; retain the stock restriction otherwise.
 					float rnd = RANDOM_FLOAT(0, 100);
 
 					if (rnd < 10.0f)

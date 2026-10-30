@@ -65,6 +65,13 @@ inline bool CanConsider(const Context &c) {
   && c.range>=300 && c.range<=1100 && c.height<=300 && c.height>=-300;
 }
 enum class Kind { HE, Flash, Smoke };
+// Try preferred utility first, then every alternative once. A blocked HE must
+// not prevent using a safe flash/smoke that is already in the inventory.
+template<class Usable> int ChooseCarried(int preferred,const int (&choices)[3],Usable usable) {
+ if(preferred && usable(preferred))return preferred;
+ for(int choice:choices)if(choice!=preferred && usable(choice))return choice;
+ return 0;
+}
 inline bool SafeDistance(const Vec &point,const Vec &ally,Kind kind) {
  float radius=kind==Kind::Smoke?170.0f:kind==Kind::Flash?550.0f:300.0f;
  return (point-ally).LengthSq()>=radius*radius;

@@ -60,6 +60,35 @@ int main()
  }
  CHECK(CompetitiveExecution::AimOffset(0,100000,true)==18);
  CHECK(CompetitiveExecution::AimOffset(4,100000,true)==4);
+
+ for(int mmr:{0,1000,1300,1301,1500,2000,3000,10000}) {
+  CHECK(CompetitiveExecution::HasRatedAim(mmr));
+  const float duration=CompetitiveExecution::OpeningDuration(mmr);
+  CHECK(duration>=.35f && duration<=3.2f);
+  for(float range:{64.0f,500.0f,2000.0f}) {
+   const float start=CompetitiveExecution::OpeningOffset(mmr,0,range);
+   CHECK(start>=32 && start<=96);
+   CHECK(CompetitiveExecution::OpeningOffset(mmr,duration*.5f,range)<start);
+   CHECK(CompetitiveExecution::OpeningOffset(mmr,duration,range)==0);
+   CHECK(CompetitiveExecution::OpeningOffset(mmr,duration+1,range)==0);
+   const float tenDegrees=std::cos(10.0f*float(3.141592653589793/180.0));
+   CHECK(tenDegrees>CompetitiveExecution::OpeningFireTolerance(range,false,true,mmr));
+   CHECK(CompetitiveExecution::OpeningFireTolerance(range,true,true,mmr)==CompetitiveExecution::FireTolerance(range,true,true));
+   CHECK(CompetitiveExecution::OpeningFireTolerance(range,false,false,mmr)==CompetitiveExecution::FireTolerance(range,false,false));
+  }
+ }
+ for(int mmr:{-1,-1000}) {
+  CHECK(!CompetitiveExecution::HasRatedAim(mmr));
+  CHECK(CompetitiveExecution::OpeningOffset(mmr,0,500)==0);
+  CHECK(CompetitiveExecution::OpeningFireTolerance(500,false,true,mmr)==CompetitiveExecution::FireTolerance(500,false,true));
+ }
+ CHECK(std::abs(CompetitiveExecution::OpeningDuration(1000)-2.6f)<.0001f);
+ CHECK(std::abs(CompetitiveExecution::OpeningDuration(2000)-1.3f)<.0001f);
+ CHECK(CompetitiveExecution::OpeningDuration(0)==3.2f);
+ CHECK(CompetitiveExecution::OpeningDuration(10000)==.35f);
+ for(int mmr=0;mmr<10000;mmr+=100)
+  CHECK(CompetitiveExecution::OpeningDuration(mmr+100)<=CompetitiveExecution::OpeningDuration(mmr));
+ CHECK(std::abs(CompetitiveExecution::OpeningDuration(1300)-CompetitiveExecution::OpeningDuration(1301))<.002f);
  CHECK(CompetitiveExecution::FireTolerance(1000,false,true)>.999f);
  CHECK(CompetitiveExecution::FireTolerance(1000,false,true)>CompetitiveExecution::FireTolerance(100,false,true));
  CHECK(CompetitiveExecution::FireTolerance(1000,true,false)>CompetitiveExecution::FireTolerance(1000,false,false));

@@ -6,6 +6,14 @@
 using namespace CompetitiveUtility;
 void check(bool v) { if(!v) std::abort(); }
 int main() {
+ const int choices[]={1,2,3};
+ int visits[4]={};
+ check(ChooseCarried(1,choices,[&](int id){++visits[id];return id==2;})==2);
+ check(visits[1]==1 && visits[2]==1 && visits[3]==0);
+ check(ChooseCarried(3,choices,[](int){return true;})==3); // plant-cover preference
+ check(ChooseCarried(3,choices,[](int id){return id==1;})==1);
+ check(ChooseCarried(0,choices,[](int id){return id==3;})==3);
+ check(ChooseCarried(1,choices,[](int){return false;})==0);
  Context c;c.enabled=c.alive=true;c.now=10;c.seen=9;c.range=600;
  check(CanConsider(c));
  for(auto member:{&Context::completed,&Context::freeze,&Context::roundOver,&Context::busy,
