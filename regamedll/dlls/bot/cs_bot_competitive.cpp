@@ -70,7 +70,8 @@ bool mobilityDecided[MAX_CLIENTS+1]={}, mobilityPreferred[MAX_CLIENTS+1]={};
 struct CoverPeek {
  CompetitiveBotPolicy::PeekCycle cycle;
  Vector exposed, covered, enemyEye;
- int enemyId = 0, shotClip = -1;
+ int enemyId = 0, shotClip = -1, volleySize = 1;
+ float volleyUntil = 0;
  bool hasCover = false;
  float nextProbe = 0, expires = 0;
 };
@@ -971,6 +972,24 @@ void PeekMove(CCSBot *bot,const Vector &goal)
  if(forward>0.25f) bot->MoveForward(); else if(forward<-.25f) bot->MoveBackward();
  if(left>0.25f) bot->StrafeLeft(); else if(left<-.25f) bot->StrafeRight();
 }
+bool NextStrafe(CCSBot *bot, CoverPeek &peek)
+{
+ Vector origin=bot->pev->origin;
+ if(bot->IsCrouching()) origin.z+=18;
+ Vector toward=peek.enemyEye-origin; toward.z=0; toward.NormalizeInPlace();
+ Vector side(-toward.y,toward.x,0);
+ int first=RANDOM_LONG(0,1)?1:-1;
+ float distance=RANDOM_FLOAT(40,96);
+ for(float step:{distance,32.0f}) for(int sign:{first,-first}) {
+  Vector candidate=origin+side*(sign*step);
+  if(PeekRoute(bot,origin,candidate)) {
+   peek.covered=candidate;
+   return true;
+  }
+ }
+ return false;
+}
+
 }
 bool UpdateCoverPeek(CCSBot *bot)
 {
@@ -981,7 +1000,7 @@ bool UpdateCoverPeek(CCSBot *bot)
  bool rifle=weapon && (weapon->m_iId==WEAPON_AK47 || weapon->m_iId==WEAPON_M4A1
   || weapon->m_iId==WEAPON_FAMAS || weapon->m_iId==WEAPON_GALIL
   || weapon->m_iId==WEAPON_AUG || weapon->m_iId==WEAPON_SG552);
- if(!Enabled() || !coverPeek.value || !IsLockedIn(bot) || Completed() || !bot->IsAlive() || !rifle
+ if(!Enabled() || !coverPeek.value || Completed() || !bot->IsAlive() || !rifle
   || !enemy || !TargetAllowed(enemy) || !enemy->IsAlive() || bot->IsBlind()
   || bot->IsReloading() || bot->IsOnLadder() || !(bot->pev->flags&FL_ONGROUND)
   || bot->pev->waterlevel>1 || bot->IsDefusingBomb() || bot->IsEscapingFromBomb()
@@ -1003,7 +1022,7 @@ bool UpdateCoverPeek(CCSBot *bot)
    if(other && other->IsBot() && other!=bot && other->IsAlive() && other->m_iTeam==bot->m_iTeam
       && coverPeeks[i].cycle.phase!=PeekPhase::Idle && now<coverPeeks[i].expires) ++participants;
   }
-  if(!CompetitiveBotPolicy::PeekParticipation(IsLockedIn(bot),participants)) return false;
+  if(!CompetitiveBotPolicy::PeekParticipation(participants)) return false;
   Vector toward=enemy->pev->origin-bot->pev->origin; toward.z=0;
   float range=toward.Length();
   if(range<200 || range>1800) return false;
@@ -1033,12 +1052,15 @@ bool UpdateCoverPeek(CCSBot *bot)
    if(!found) return false;
   }
   peek.exposed=origin; peek.enemyEye=enemy->EyePosition(); peek.enemyId=enemyId;
-  peek.expires=now+5; peek.shotClip=-1;
+  peek.expires=now+12; peek.shotClip=-1;
   peek.cycle.phase=PeekPhase::Fire; peek.cycle.deadline=now+1.5f;
+  peek.volleySize=CompetitiveBotPolicy::RifleVolleySize(range,RANDOM_LONG(0,99));
  }
  // Never track an unseen target through the wall. Keep the last observed sightline.
  if(bot->IsEnemyVisible() && bot->IsVisible(enemy,true)) peek.enemyEye=enemy->EyePosition();
- if(peek.cycle.phase==PeekPhase::Fire && peek.shotClip>=0 && weapon->m_iClip<peek.shotClip) {
+ if(peek.cycle.phase==PeekPhase::Fire && peek.shotClip>=0
+    && (CompetitiveBotPolicy::RifleVolleyComplete(peek.shotClip,weapon->m_iClip,peek.volleySize)
+        || now>=peek.volleyUntil || !bot->IsEnemyVisible())) {
   peek.cycle.Start(now); peek.shotClip=-1;
  }
  bool covered=!peek.hasCover || PeekCovered(bot,bot->pev->origin,peek.enemyEye);
@@ -1049,9 +1071,14 @@ bool UpdateCoverPeek(CCSBot *bot)
   peek.nextProbe=now+1; return false;
  }
  if(peek.cycle.phase!=PeekPhase::Fire) peek.shotClip=-1;
- if(!peek.hasCover && previous==PeekPhase::Expose && peek.cycle.phase==PeekPhase::Fire) {
-  // Alternate short lateral positions, firing only after arriving and settling.
-  Vector next=peek.exposed; peek.exposed=peek.covered; peek.covered=next;
+ if(previous!=PeekPhase::Fire && peek.cycle.phase==PeekPhase::Fire) {
+  peek.expires=now+12;
+  peek.volleySize=CompetitiveBotPolicy::RifleVolleySize(
+   (peek.enemyEye-bot->pev->origin).Length(),RANDOM_LONG(0,99));
+  // No fixed A/D alternation: repeated steps in either direction are possible.
+  if(!peek.hasCover && !NextStrafe(bot,peek)) {
+   peek.cycle.phase=PeekPhase::Idle; peek.nextProbe=now+.3f; return false;
+  }
  }
  bot->StandUp(); bot->Run(); bot->ClearMovement();
  bot->ClearPrimaryAttack();
@@ -1060,12 +1087,13 @@ bool UpdateCoverPeek(CCSBot *bot)
   if(!PeekRoute(bot,bot->pev->origin,goal)) {
    peek.cycle.phase=PeekPhase::Idle; peek.nextProbe=now+1; return false;
   }
-  if((goal-bot->pev->origin).Length2D()<40) bot->Walk();
+  if((goal-bot->pev->origin).Length2D()<24) bot->Walk();
   PeekMove(bot,goal);
  } else if(peek.cycle.phase==PeekPhase::Fire && bot->IsEnemyVisible()
-           && peek.shotClip<0
-           && CompetitiveBotPolicy::RifleTapReady(bot->pev->velocity.Length2D(),
-              bot->pev->punchangle.Length2D(),weapon->m_iShotsFired,true)) {
+           && bot->pev->velocity.Length2D()<10
+           && ((peek.shotClip>=0 && now<peek.volleyUntil)
+             || CompetitiveBotPolicy::RifleTapReady(bot->pev->velocity.Length2D(),
+              bot->pev->punchangle.Length2D(),weapon->m_iShotsFired,true))) {
   // FAMAS burst mode would emit three shots from a single trigger press.
   if(weapon->m_iId==WEAPON_FAMAS && (weapon->m_iWeaponState & WPNSTATE_FAMAS_BURST_MODE)) {
    bot->SecondaryAttack(); return true;
@@ -1097,16 +1125,19 @@ bool HoldLastEnemyAngle(CCSBot *bot)
 void RifleTapRequested(CCSBot *bot)
 {
  auto &peek=coverPeeks[bot->entindex()]; auto *weapon=bot->GetActiveWeapon();
- if(peek.cycle.phase==CompetitiveBotPolicy::PeekPhase::Fire && weapon)
+ if(peek.cycle.phase==CompetitiveBotPolicy::PeekPhase::Fire && weapon && peek.shotClip<0) {
   peek.shotClip=weapon->m_iClip;
+  peek.volleyUntil=gpGlobals->time+.65f;
+ }
 }
 
 void ReleaseRifleTap(CCSBot *bot)
 {
  auto &peek=coverPeeks[bot->entindex()]; auto *weapon=bot->GetActiveWeapon();
- // Upkeep runs faster than combat decisions: release before another automatic shot.
+ // Upkeep runs faster than combat decisions: cap the actual volley, not trigger requests.
  if(peek.cycle.phase!=CompetitiveBotPolicy::PeekPhase::Idle && peek.shotClip>=0
-    && weapon && weapon->m_iClip<peek.shotClip) {
+    && weapon && (CompetitiveBotPolicy::RifleVolleyComplete(peek.shotClip,weapon->m_iClip,peek.volleySize)
+      || gpGlobals->time>=peek.volleyUntil || !bot->IsEnemyVisible())) {
   bot->StopRapidFire(); bot->ClearPrimaryAttack();
  }
 }

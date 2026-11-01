@@ -555,3 +555,34 @@ Combat/noise investigation and explicit human orders retain priority. Objective
 carriers are excluded. Automatic team-support regrouping is skipped in Arena;
 other game modes retain their existing behavior. This is navigation selection,
 not a change to movement physics, aiming, recoil, or weapon balance.
+
+
+### Rifle volleys and varied lateral movement
+
+`bot_cover_peek 1` permits up to two active rifle movers per team outside the
+locked-in phase as well as during it. Objective, protected-order, reload, ladder,
+water and airborne exclusions still apply. Nearby opaque cover remains preferred:
+retreat breaks the observed sightline, then the bot returns to its exposed point.
+With `bot_combat_movement 1`, open-space movement instead selects a fresh safe
+lateral destination each volley (40–96 units, with a shorter blocked-route fallback).
+Independent direction draws allow several consecutive steps in the same direction.
+
+Rifles mix taps and two/three-shot volleys, favoring taps beyond 1000 units and
+capping medium-range volleys at two shots. Actual clip consumption caps each volley;
+a 0.65-second bound releases an incomplete volley. Each new volley requires speed
+below 10, recovered punch and zero accumulated shots. Existing aim, reaction and
+friendly-fire gates remain in force; no weapon accuracy or recoil values change.
+Successful cycles renew their lease so a sustained duel does not periodically fall
+back into stock moving fire simply because the original five-second lease expired.
+
+`tests/engine/rifle_movement_native.sma` runs on an isolated de_dust2 server with
+native bots enabled in `game_init.cfg` (`bot_enable 1`), AMXX/ReAPI and its required
+modules/gamedata. Compile and load this fixture alone; it starts two bots and quits
+the server after 28 seconds. It leaves the armed observer free to move, holds only
+the target, and does not enable a locked-in phase. The fixture requires repeated
+ranged hits, at least three changes of firing position, a short burst and no shots
+above 30 units/second. The verified Linux x86 run recorded 29 shots/hits, 12 volleys,
+11 changes of firing position, 11 short bursts and zero moving shots. This verifies
+open-space rifle movement; cover geometry and Windows runtime still need gameplay
+validation. The four CTest suites also pass. Existing instances retain their loaded DLL;
+new instances load the updated provider after deployment.

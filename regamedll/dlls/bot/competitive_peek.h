@@ -32,11 +32,18 @@ struct PeekCycle {
 };
 inline bool RememberThreat(float age) { return age>=0 && age<6.0f; }
 inline bool HoldLostAngle(float age) { return age>=0 && age<1.25f; }
+// Longer ranges favor taps; close rifle duels mix taps and two/three-shot bursts.
+inline int RifleVolleySize(float range, int roll) {
+ return range>1000 || roll<30 ? 1 : range>600 || roll<75 ? 2 : 3;
+}
+inline bool RifleVolleyComplete(int initialClip, int clip, int budget) {
+ return initialClip>=0 && (clip<=0 || initialClip-clip>=budget);
+}
 inline bool RifleTapReady(float speed, float punch, int shots, bool grounded) {
  return grounded && speed<10 && punch<0.6f && shots==0;
 }
-inline bool PeekParticipation(bool lockedIn, int teammates) {
- return lockedIn && teammates<2;
+inline bool PeekParticipation(int teammates) {
+ return teammates<2;
 }
 // One draw per buy phase, rather than rerolling on every failed purchase.
 inline int CompetitiveBuyRole(int roll) { return roll < 85 ? 0 : roll < 95 ? 1 : 2; }

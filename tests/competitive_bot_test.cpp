@@ -39,15 +39,23 @@ int main()
   CHECK(!RememberThreat(NAN));
   CHECK(HoldLostAngle(1.2f));
   CHECK(!HoldLostAngle(1.25f));
-  CHECK(PeekParticipation(true,0));
-  CHECK(PeekParticipation(true,1));
-  CHECK(!PeekParticipation(true,2));
-  CHECK(!PeekParticipation(false,0));
+  CHECK(PeekParticipation(0));
+  CHECK(PeekParticipation(1));
+  CHECK(!PeekParticipation(2));
   CHECK(RifleTapReady(0,.1f,0,true));
   CHECK(!RifleTapReady(80,.1f,0,true));
   CHECK(!RifleTapReady(0,1,0,true));
   CHECK(!RifleTapReady(0,.1f,1,true));
   CHECK(!RifleTapReady(0,.1f,0,false));
+  CHECK(RifleVolleySize(350,0)==1);
+  CHECK(RifleVolleySize(350,50)==2);
+  CHECK(RifleVolleySize(350,99)==3);
+  CHECK(RifleVolleySize(800,99)==2);
+  CHECK(RifleVolleySize(1400,99)==1);
+  CHECK(!RifleVolleyComplete(30,29,3));
+  CHECK(RifleVolleyComplete(30,27,3));
+  CHECK(RifleVolleyComplete(1,0,3)); // empty clip ends a partial volley
+  CHECK(!RifleVolleyComplete(-1,20,1));
   int roles[3]={};
   for(int roll=0;roll<100;++roll) ++roles[CompetitiveBuyRole(roll)];
   CHECK(roles[0]==85 && roles[1]==10 && roles[2]==5);
