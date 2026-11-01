@@ -47,6 +47,7 @@ void CCSBot::Upkeep()
 
 	if (m_isRapidFiring)
 		TogglePrimaryAttack();
+	CompetitiveBots::ReleaseRifleTap(this);
 
 	// aiming must be smooth - update often
 	if (IsAimingAtEnemy())
@@ -487,7 +488,7 @@ void CCSBot::Update()
 
 	// if we have seen an enemy recently, keep an eye on him if we can
 	const float seenRecentTime = 3.0f;
-	if (m_enemy.IsValid() && GetTimeSinceLastSawEnemy() < seenRecentTime)
+	if (m_enemy.IsValid() && (CompetitiveBots::RememberEnemy(this) || GetTimeSinceLastSawEnemy() < seenRecentTime))
 	{
 		AimAtEnemy();
 	}

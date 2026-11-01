@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "competitive_policy.h"
+#include "competitive_peek.h"
+#include "competitive_idle.h"
 #include "competitive_away.h"
 #include "competitive_arena_spread.h"
 #include "competitive_team_order.h"
@@ -19,6 +21,57 @@ int main()
 {
 	int failures = 0;
 #define CHECK(value) do { if (!(value)) { std::fprintf(stderr, "line %d: %s\n", __LINE__, #value); ++failures; } } while (0)
+ {
+  CompetitiveIdleRecovery idle;
+  CHECK(!idle.Update(10,true,false));
+  CHECK(!idle.Update(17.9f,true,false));
+  CHECK(idle.Update(18,true,false));
+  CHECK(!idle.Update(19,true,false));
+  CHECK(!idle.Update(20,false,false)); // guarding/objective/order cancels timer
+  CHECK(!idle.Update(40,true,false));
+  CHECK(!idle.Update(47,true,true)); // movement restarts timer
+  CHECK(!idle.Update(50,true,false));
+  CHECK(idle.Update(55,true,false));
+  using namespace CompetitiveBotPolicy;
+  CHECK(RememberThreat(5.9f));
+  CHECK(!RememberThreat(6));
+  CHECK(!RememberThreat(-1));
+  CHECK(!RememberThreat(NAN));
+  CHECK(HoldLostAngle(1.2f));
+  CHECK(!HoldLostAngle(1.25f));
+  CHECK(PeekParticipation(true,0));
+  CHECK(PeekParticipation(true,1));
+  CHECK(!PeekParticipation(true,2));
+  CHECK(!PeekParticipation(false,0));
+  CHECK(RifleTapReady(0,.1f,0,true));
+  CHECK(!RifleTapReady(80,.1f,0,true));
+  CHECK(!RifleTapReady(0,1,0,true));
+  CHECK(!RifleTapReady(0,.1f,1,true));
+  CHECK(!RifleTapReady(0,.1f,0,false));
+  int roles[3]={};
+  for(int roll=0;roll<100;++roll) ++roles[CompetitiveBuyRole(roll)];
+  CHECK(roles[0]==85 && roles[1]==10 && roles[2]==5);
+  PeekCycle peek;
+  peek.Start(10);
+  CHECK(peek.Step(10.2f,true,false,.3f));
+  CHECK(peek.phase==PeekPhase::Retreat); // arrival alone is not cover
+  CHECK(peek.Step(10.3f,true,true,.3f));
+  CHECK(peek.phase==PeekPhase::Hidden);
+  CHECK(peek.Step(10.5f,true,true,.3f));
+  CHECK(peek.phase==PeekPhase::Hidden); // no immediate re-exposure
+  CHECK(peek.Step(10.7f,true,true,.3f));
+  CHECK(peek.phase==PeekPhase::Expose);
+  CHECK(peek.Step(10.8f,false,false,.3f));
+  CHECK(peek.phase==PeekPhase::Expose); // do not shoot while moving out
+  CHECK(peek.Step(11,true,false,.3f));
+  CHECK(peek.phase==PeekPhase::Fire);
+  CHECK(peek.Step(12.6f,true,false,.3f));
+  CHECK(peek.phase==PeekPhase::Retreat); // bounded exposure even if unable to fire
+  CHECK(!peek.Step(14,false,false,.3f)); // blocked route cannot stick indefinitely
+  peek.Start(20);
+  CHECK(peek.Step(20.1f,true,true,.3f));
+  CHECK(!peek.Step(20.2f,true,false,.3f)); // cover no longer protects us
+ }
  CHECK(arenaSpreadAllowed(2,true,false,false));
  CHECK(!arenaSpreadAllowed(0,true,false,false));
  CHECK(!arenaSpreadAllowed(1,true,false,false));

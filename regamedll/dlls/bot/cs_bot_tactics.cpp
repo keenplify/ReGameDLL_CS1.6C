@@ -3,6 +3,7 @@
 #include "cs_bot_competitive.h"
 #include "competitive_execution.h"
 #include "competitive_lock_in.h"
+#include "competitive_idle.h"
 #include "competitive_enemy_damage.h"
 #include "competitive_score_reaction.h"
 #include "competitive_spree.h"
@@ -18,6 +19,8 @@ struct State {
  bool early=false,head=false,hasSample=false,saving=false,reloading=false;
  bool lockPlanned=false,lockActive=false;
  CompetitiveLockIn::Window lockWindow {};
+ CompetitiveIdleRecovery idleRecovery;
+ Vector progressOrigin {0,0,0};
  float recoilUntil=0,acquired=0,nextSample=0,nextTick=0,nextCover=0,nextSupport=0,nextPlant=0,avoidUntil=0;
  float nextLockCheck=0,lastSeen=0,openingSide=1;
  float orderUntil=0,streakDue=0;
@@ -126,6 +129,7 @@ void Notice(CCSBot *b,CBasePlayer *target) {
  }
  s.lastSeen=gpGlobals->time;
 }
+bool IsLockedIn(CCSBot *b) { return LockedIn(b); }
 float ExecutionSkill(CCSBot *b){if(!Enabled())return b->GetProfile()->GetSkill();float skill=CompetitiveExecution::Get(Level()).skill;return LockedIn(b)?std::min(.99f,skill+.08f):skill;}
 float ExecutionReaction(CCSBot *b){if(!Enabled())return b->GetProfile()->GetReactionTime();float reaction=CompetitiveExecution::Reaction(Level(),Get(b).early);return LockedIn(b)?std::max(.09f,reaction*.8f):reaction;}
 bool AimAtHead(CCSBot *b){
@@ -221,7 +225,21 @@ void UpdateTactics(CCSBot *b) {
 
  int threshold=Ffa()?40:20;
  if(b->pev->frags>=threshold && int(b->pev->frags)/10>s.milestone && gpGlobals->time>=nextBanter){s.milestone=int(b->pev->frags)/10;const char *line=Ffa()?(b->m_iDeaths>b->pev->frags+2?"still getting cooked":"feeling good today"):(b->m_iDeaths>b->pev->frags+2?"need to regroup":"we're finding picks");if(Banter(b,nullptr,!Ffa(),line))nextBanter=gpGlobals->time+30;}
- if(CSGameRules()->IsFreezePeriod() || CSGameRules()->m_iRoundWinStatus!=WINSTATUS_NONE || Busy(b))return;
+ const bool paused=CSGameRules()->IsFreezePeriod() || CSGameRules()->m_iRoundWinStatus!=WINSTATUS_NONE || Busy(b);
+ const bool roam=b->GetTask()==CCSBot::SEEK_AND_DESTROY || b->GetTask()==CCSBot::MOVE_TO_LAST_KNOWN_ENEMY_POSITION;
+ const bool eligible=!paused && roam && !s.saving && !HasHumanOrder(b) && !b->IsBuying()
+  && !b->IsAttacking() && !b->IsEnemyVisible() && !RememberEnemy(b) && !b->CanHearNearbyEnemyGunfire()
+  && !b->IsReloading() && !b->IsBlind() && !b->IsFollowing() && !b->IsOnLadder()
+  && (b->pev->flags&FL_ONGROUND) && !PauseForTyping(b) && b->GetTimeSinceAttacked()>3;
+ const bool progressed=(b->pev->origin-s.progressOrigin).LengthSquared()>32*32;
+ if(!eligible || progressed) s.progressOrigin=b->pev->origin;
+ if(s.idleRecovery.Update(gpGlobals->time,eligible,progressed)) {
+  b->ClearLookAt(); b->StopAiming(); b->DestroyPath(); b->ResetStuckMonitor();
+  b->SetDisposition(CCSBot::ENGAGE_AND_INVESTIGATE); b->Run(); b->StandUp(); b->Idle();
+  b->PrintIfWatched("Resuming task after eight seconds without progress.\n");
+  return;
+ }
+ if(paused)return;
  bool pressure=b->GetTimeSinceAttacked()<1.5f && b->pev->health<s.lastHealth-15;
  s.lastHealth=int(b->pev->health);
  if((b->IsReloading() || pressure) && !HasHumanOrder(b) && gpGlobals->time>=s.nextCover){s.nextCover=gpGlobals->time+5;if(b->TryToRetreat())Tactical(b,b->IsReloading()?"Reloading. Cover me.":"Need backup.","%!MRAD_BACKUP");}

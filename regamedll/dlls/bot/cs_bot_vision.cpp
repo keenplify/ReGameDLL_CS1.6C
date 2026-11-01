@@ -417,7 +417,7 @@ void CCSBot::UpdateLookAround(bool updateNow)
 	if (gpGlobals->time < m_inhibitLookAroundTimestamp)
 		return;
 
-	const float recentThreatTime = 0.25f; // 1.0f;
+	const float recentThreatTime = CompetitiveBots::Enabled() ? 6.0f : 0.25f;
 
 	// Unless we can hear them moving, in which case look towards the noise
 	if (!IsEnemyVisible())
@@ -428,7 +428,7 @@ void CCSBot::UpdateLookAround(bool updateNow)
 			Vector spot = m_noisePosition;
 			spot.z += HalfHumanHeight;
 
-			SetLookAt("Check dangerous noise", &spot, PRIORITY_HIGH, recentThreatTime);
+			SetLookAt("Check dangerous noise", &spot, PRIORITY_HIGH, 0.25f);
 			InhibitLookAround(RANDOM_FLOAT(2.0f, 4.0f));
 
 			return;
@@ -446,7 +446,8 @@ void CCSBot::UpdateLookAround(bool updateNow)
 		if (GetSimpleGroundHeight(&m_lastEnemyPosition, &spot.z))
 		{
 			spot.z += HalfHumanHeight;
-			SetLookAt("Last Enemy Position", &spot, PRIORITY_MEDIUM, RANDOM_FLOAT(2.0f, 3.0f), true);
+			const float hold = CompetitiveBots::Enabled() ? Q_min(2.0f, recentThreatTime - GetTimeSinceLastSawEnemy()) : RANDOM_FLOAT(2.0f, 3.0f);
+			SetLookAt("Last Enemy Position", &spot, PRIORITY_MEDIUM, hold, true);
 			return;
 		}
 	}

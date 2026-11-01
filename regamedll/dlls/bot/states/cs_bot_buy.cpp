@@ -48,6 +48,7 @@ bool HasDefaultPistol(CCSBot *me)
 // Buy weapons, armor, etc.
 void BuyState::OnEnter(CCSBot *me)
 {
+	CompetitiveBots::BeginCompetitiveBuy(me);
 	m_retries = 0;
 	m_prefRetries = 0;
 	m_prefIndex = 0;
@@ -291,10 +292,12 @@ void BuyState::OnUpdate(CCSBot *me)
 	{
 		me->m_stateTimestamp = gpGlobals->time;
 
+		const bool rifleBuying = CompetitiveBots::RifleBuying();
+		const int preferenceCount = rifleBuying ? 4 : me->GetProfile()->GetWeaponPreferenceCount();
 		bool isPreferredAllDisallowed = true;
 
 		// try to buy our preferred weapons first
-		if (m_prefIndex < me->GetProfile()->GetWeaponPreferenceCount())
+		if (m_prefIndex < preferenceCount && (!rifleBuying || !me->m_bHasPrimary))
 		{
 			// need to retry because sometimes first buy fails??
 			const int maxPrefRetries = 2;
@@ -306,7 +309,7 @@ void BuyState::OnUpdate(CCSBot *me)
 				return;
 			}
 
-			int weaponPreference = me->GetProfile()->GetWeaponPreference(m_prefIndex);
+			int weaponPreference = rifleBuying ? CompetitiveBots::BuyPreference(me, m_prefIndex) : me->GetProfile()->GetWeaponPreference(m_prefIndex);
 
 			// don't buy it again if we still have one from last round
 			CBasePlayerWeapon *pCurrentWeapon = me->GetActiveWeapon();
@@ -381,7 +384,7 @@ void BuyState::OnUpdate(CCSBot *me)
 		}
 
 		// if we have no preferred primary weapon (or everything we want is disallowed), buy at random
-		if (!me->m_bHasPrimary && (isPreferredAllDisallowed || !me->GetProfile()->HasPrimaryPreference()))
+		if (!rifleBuying && !me->m_bHasPrimary && (isPreferredAllDisallowed || !me->GetProfile()->HasPrimaryPreference()))
 		{
 			if (m_buyShield)
 			{

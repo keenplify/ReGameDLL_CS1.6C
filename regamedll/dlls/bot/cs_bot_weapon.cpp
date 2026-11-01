@@ -139,6 +139,7 @@ void CCSBot::FireWeaponAtEnemy()
 					else
 					{
 						PrimaryAttack();
+						CompetitiveBots::RifleTapRequested(this);
 					}
 				}
 

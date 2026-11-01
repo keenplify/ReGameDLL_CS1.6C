@@ -232,3 +232,31 @@ Thanks to the project [ReHLDS](https://github.com/dreamstalker/rehlds) ( ReGameD
 ## How can I help the project?
 Just install it on your game server and report problems you faced.<br />
 Merge requests are also welcome :shipit:
+
+### Competitive rifle movement and awareness
+
+With `bot_competitive 1`, `bot_rifle_buy 1` gives new primary purchases an
+85% AK-47/M4A1, 10% AWP, and 5% M3 first-choice mix. Unaffordable choices fall
+back through the team rifle, FAMAS/Galil, and MP5. Existing primaries are kept;
+eco orders and weapon-category restrictions still apply. Disable this cvar to
+restore profile-based buying. The mix describes purchase intentions, not a
+guaranteed distribution of weapons after deaths, pickups, and economy rounds.
+
+`bot_cover_peek 1` enables rifle tap/reposition behavior only during the existing
+locked-in window, with at most two active bots per team. At medium range they
+prefer nearby opaque cover verified against head/torso/shoulder sightlines and
+a traversable, supported player-hull route. They fire one shot, move, stop, and
+wait for the weapon shot counter and recoil to recover. In open space,
+`bot_combat_movement 1` allows short lateral repositioning instead; this is not
+a cover peek. No weapon accuracy, recoil, or movement rules are changed.
+
+Last-seen threat attention lasts six seconds, with a brief 1.25-second angle
+hold before ordinary investigation/disengagement. Hidden enemy positions are
+not refreshed. Ordinary roaming/chasing bots with no recent threat and no
+positional progress for eight seconds clear their stale path/look target and
+choose a task again. Objectives, saving, guarding, and human orders are excluded.
+
+Validation: native Linux build and policy tests cover state transitions,
+recovery gates, participation limits, buying-role proportions, memory expiry,
+and idle recovery. Actual corner geometry, shot cadence, and match behavior
+still need in-game validation; Windows runtime behavior is not yet verified.

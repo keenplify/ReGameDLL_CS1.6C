@@ -3,6 +3,7 @@
 #include "precompiled.h"
 #include "cs_bot_competitive.h"
 #include "competitive_policy.h"
+#include "competitive_peek.h"
 #include "competitive_away.h"
 #include "competitive_ping.h"
 #include "../../../query/query_packet.h"
@@ -26,6 +27,8 @@ cvar_t enabled = { "bot_competitive", "0", FCVAR_SERVER, 0.0f, nullptr };
 cvar_t teamOrders = { "bot_team_orders", "1", FCVAR_SERVER, 0.0f, nullptr };
 cvar_t textChat = { "bot_text_chat", "1", FCVAR_SERVER, 0.0f, nullptr };
 cvar_t combatMovement = { "bot_combat_movement", "1", FCVAR_SERVER, 0.0f, nullptr };
+cvar_t coverPeek = { "bot_cover_peek", "1", FCVAR_SERVER, 0, nullptr };
+cvar_t rifleBuy = { "bot_rifle_buy", "1", FCVAR_SERVER, 0, nullptr };
 cvar_t captainMode = { "bot_captain_mode", "1", FCVAR_SERVER, 0.0f, nullptr };
 cvar_t pingComms = { "bot_ping_comms", "1", FCVAR_SERVER, 0.0f, nullptr };
 cvar_t showLatency = { "bot_show_latency", "0", FCVAR_SERVER, 0.0f, nullptr };
@@ -64,6 +67,15 @@ struct Slot {
 };
 Slot slots[MAX_CLIENTS + 1];
 bool mobilityDecided[MAX_CLIENTS+1]={}, mobilityPreferred[MAX_CLIENTS+1]={};
+struct CoverPeek {
+ CompetitiveBotPolicy::PeekCycle cycle;
+ Vector exposed, covered, enemyEye;
+ int enemyId = 0, shotClip = -1;
+ bool hasCover = false;
+ float nextProbe = 0, expires = 0;
+};
+CoverPeek coverPeeks[MAX_CLIENTS+1];
+int buyRoles[MAX_CLIENTS+1] = {};
 bool eco[4] = {};
 float nextTeamChat[4] = {};
 float nextTeamPing[4] = {};
@@ -711,7 +723,7 @@ void LoadAliases() {
 void RegisterCVars()
 {
 	RegisterGrenadeCVars(); RegisterTacticsCVars(); LoadAliases();
-	CVAR_REGISTER(&highPing);CVAR_REGISTER(&mediumPing);CVAR_REGISTER(&combatMovement); CVAR_REGISTER(&captainMode); CVAR_REGISTER(&pingComms); CVAR_REGISTER(&showLatency); CVAR_REGISTER(&pingMin); CVAR_REGISTER(&pingMax);
+	CVAR_REGISTER(&highPing);CVAR_REGISTER(&mediumPing);CVAR_REGISTER(&combatMovement); CVAR_REGISTER(&coverPeek); CVAR_REGISTER(&rifleBuy); CVAR_REGISTER(&captainMode); CVAR_REGISTER(&pingComms); CVAR_REGISTER(&showLatency); CVAR_REGISTER(&pingMin); CVAR_REGISTER(&pingMax);
 	CVAR_REGISTER(&aiBridge); CVAR_REGISTER(&queryHook); CVAR_REGISTER(&enabled); CVAR_REGISTER(&teamOrders); CVAR_REGISTER(&textChat); CVAR_REGISTER(&roundChat);
 }
 bool ShowsLatency() { return showLatency.value > 0; }
@@ -867,6 +879,7 @@ bool MobileCombatWeapon(CCSBot *bot)
 void BeginCombatMovement(CCSBot *bot)
 {
  mobilityDecided[bot->entindex()]=mobilityPreferred[bot->entindex()]=false;
+ coverPeeks[bot->entindex()]=CoverPeek {};
 }
 bool PreferMobileCombat(CCSBot *bot)
 {
@@ -897,6 +910,207 @@ bool SafeCombatStrafe(CCSBot *bot,bool left)
  return !tr.fStartSolid && !tr.fAllSolid && tr.flFraction<1 && tr.vecPlaneNormal.z>=.7f;
 }
 
+bool RifleBuying()
+{
+ return Enabled() && rifleBuy.value && TheCSBots()->AllowRifles();
+}
+void BeginCompetitiveBuy(CCSBot *bot)
+{
+ buyRoles[bot->entindex()]=CompetitiveBotPolicy::CompetitiveBuyRole(RANDOM_LONG(0,99));
+}
+int BuyPreference(CCSBot *bot,int index)
+{
+ const bool ct=bot->m_iTeam==CT;
+ const int rifle=ct?WEAPON_M4A1:WEAPON_AK47;
+ if(index==0) {
+  int role=buyRoles[bot->entindex()];
+  if(role==1 && TheCSBots()->AllowSnipers()) return WEAPON_AWP;
+  if(role==2 && TheCSBots()->AllowShotguns()) return WEAPON_M3;
+  return rifle;
+ }
+ if(index==1) return rifle;
+ if(index==2) return ct?WEAPON_FAMAS:WEAPON_GALIL;
+ return WEAPON_MP5N;
+}
+
+namespace {
+// Check the whole short route, including support between endpoints, not just the destination.
+bool PeekRoute(CCSBot *bot,const Vector &from,const Vector &to)
+{
+ TraceResult tr;
+ UTIL_TraceHull(from,to,dont_ignore_monsters,human_hull,bot->edict(),&tr);
+ if(!CompetitiveBotPolicy::ClearTrace(tr.flFraction,tr.fStartSolid,tr.fAllSolid)) return false;
+ int steps=int((to-from).Length2D()/16)+1;
+ for(int i=0;i<=steps;++i) {
+  Vector point=from+(to-from)*(float(i)/steps);
+  UTIL_TraceLine(point,point-Vector(0,0,54),ignore_monsters,bot->edict(),&tr);
+  if(tr.fStartSolid || tr.fAllSolid || tr.flFraction==1 || tr.vecPlaneNormal.z<0.7f) return false;
+ }
+ return true;
+}
+bool PeekCovered(CCSBot *bot,const Vector &origin,const Vector &enemyEye)
+{
+ // Head, torso and both shoulders must be occluded by nearby solid cover.
+ Vector facing=enemyEye-origin; facing.z=0; facing.NormalizeInPlace();
+ Vector side(-facing.y,facing.x,0);
+ const Vector points[]={origin+Vector(0,0,28), origin,
+  origin+Vector(0,0,18)+side*16, origin+Vector(0,0,18)-side*16};
+ for(const auto &point:points) {
+  TraceResult tr;
+  UTIL_TraceLine(point,enemyEye,ignore_monsters,bot->edict(),&tr);
+  if(tr.fStartSolid || tr.fAllSolid || tr.flFraction==1 || (tr.vecEndPos-point).Length()>128) return false;
+ }
+ return true;
+}
+void PeekMove(CCSBot *bot,const Vector &goal)
+{
+ Vector delta=goal-bot->pev->origin; delta.z=0; delta.NormalizeInPlace();
+ float yaw=bot->pev->v_angle.y*float(M_PI/180.0);
+ float forward=delta.x*std::cos(yaw)+delta.y*std::sin(yaw);
+ float left=-delta.x*std::sin(yaw)+delta.y*std::cos(yaw);
+ if(forward>0.25f) bot->MoveForward(); else if(forward<-.25f) bot->MoveBackward();
+ if(left>0.25f) bot->StrafeLeft(); else if(left<-.25f) bot->StrafeRight();
+}
+}
+bool UpdateCoverPeek(CCSBot *bot)
+{
+ using CompetitiveBotPolicy::PeekPhase;
+ auto &peek=coverPeeks[bot->entindex()];
+ auto *enemy=bot->GetEnemy(); auto *weapon=bot->GetActiveWeapon();
+ const float now=gpGlobals->time;
+ bool rifle=weapon && (weapon->m_iId==WEAPON_AK47 || weapon->m_iId==WEAPON_M4A1
+  || weapon->m_iId==WEAPON_FAMAS || weapon->m_iId==WEAPON_GALIL
+  || weapon->m_iId==WEAPON_AUG || weapon->m_iId==WEAPON_SG552);
+ if(!Enabled() || !coverPeek.value || !IsLockedIn(bot) || Completed() || !bot->IsAlive() || !rifle
+  || !enemy || !TargetAllowed(enemy) || !enemy->IsAlive() || bot->IsBlind()
+  || bot->IsReloading() || bot->IsOnLadder() || !(bot->pev->flags&FL_ONGROUND)
+  || bot->pev->waterlevel>1 || bot->IsDefusingBomb() || bot->IsEscapingFromBomb()
+  || bot->m_bIsVIP || bot->HasShield() || bot->GetTask()==CCSBot::PLANT_BOMB
+  || bot->GetTask()==CCSBot::HOLD_POSITION || bot->GetTask()==CCSBot::SNIPING
+  || IsManagingGrenade(bot) || HasHumanOrder(bot)) {
+  peek.cycle.phase=PeekPhase::Idle; return false;
+ }
+ const int enemyId=GETPLAYERUSERID(enemy->edict());
+ if(peek.cycle.phase!=PeekPhase::Idle && (peek.enemyId!=enemyId || now>=peek.expires)) {
+  peek.cycle.phase=PeekPhase::Idle; peek.nextProbe=now+1; return false;
+ }
+ if(peek.cycle.phase==PeekPhase::Idle) {
+  if(now<peek.nextProbe || !bot->IsEnemyVisible() || !bot->IsVisible(enemy,true)) return false;
+  peek.nextProbe=now+RANDOM_FLOAT(1,2);
+  int participants=0;
+  for(int i=1;i<=gpGlobals->maxClients;++i) {
+   auto *other=Player(i);
+   if(other && other->IsBot() && other!=bot && other->IsAlive() && other->m_iTeam==bot->m_iTeam
+      && coverPeeks[i].cycle.phase!=PeekPhase::Idle && now<coverPeeks[i].expires) ++participants;
+  }
+  if(!CompetitiveBotPolicy::PeekParticipation(IsLockedIn(bot),participants)) return false;
+  Vector toward=enemy->pev->origin-bot->pev->origin; toward.z=0;
+  float range=toward.Length();
+  if(range<200 || range>1800) return false;
+  toward.NormalizeInPlace(); Vector side(-toward.y,toward.x,0);
+  Vector origin=bot->pev->origin;
+  // Probe with a standing hull even if stock combat chose to crouch.
+  if(bot->IsCrouching()) origin.z+=18;
+  bool found=false;
+  int first=RANDOM_LONG(0,1)?1:-1;
+  for(int distance=40;distance<=88 && !found;distance+=24) {
+   for(int sign:{first,-first}) {
+    Vector candidate=origin+side*float(sign*distance);
+    if(PeekRoute(bot,origin,candidate) && PeekCovered(bot,candidate,enemy->EyePosition())) {
+     peek.covered=candidate; found=true; break;
+    }
+   }
+  }
+  peek.hasCover=found;
+  if(!found) {
+   if(!combatMovement.value) return false;
+   // Open-space tap/strafe uses the same safe movement and recovery gates,
+   // but is not presented as a cover peek.
+   for(int sign:{first,-first}) {
+    Vector candidate=origin+side*float(sign*48);
+    if(PeekRoute(bot,origin,candidate)) { peek.covered=candidate; found=true; break; }
+   }
+   if(!found) return false;
+  }
+  peek.exposed=origin; peek.enemyEye=enemy->EyePosition(); peek.enemyId=enemyId;
+  peek.expires=now+5; peek.shotClip=-1;
+  peek.cycle.phase=PeekPhase::Fire; peek.cycle.deadline=now+1.5f;
+ }
+ // Never track an unseen target through the wall. Keep the last observed sightline.
+ if(bot->IsEnemyVisible() && bot->IsVisible(enemy,true)) peek.enemyEye=enemy->EyePosition();
+ if(peek.cycle.phase==PeekPhase::Fire && peek.shotClip>=0 && weapon->m_iClip<peek.shotClip) {
+  peek.cycle.Start(now); peek.shotClip=-1;
+ }
+ bool covered=!peek.hasCover || PeekCovered(bot,bot->pev->origin,peek.enemyEye);
+ Vector goal=peek.cycle.phase==PeekPhase::Expose && peek.hasCover?peek.exposed:peek.covered;
+ bool arrived=(goal-bot->pev->origin).Length2D()<10;
+ auto previous=peek.cycle.phase;
+ if(!peek.cycle.Step(now,arrived,covered,RANDOM_FLOAT(.22f,.38f))) {
+  peek.nextProbe=now+1; return false;
+ }
+ if(peek.cycle.phase!=PeekPhase::Fire) peek.shotClip=-1;
+ if(!peek.hasCover && previous==PeekPhase::Expose && peek.cycle.phase==PeekPhase::Fire) {
+  // Alternate short lateral positions, firing only after arriving and settling.
+  Vector next=peek.exposed; peek.exposed=peek.covered; peek.covered=next;
+ }
+ bot->StandUp(); bot->Run(); bot->ClearMovement();
+ bot->ClearPrimaryAttack();
+ if(peek.cycle.phase==PeekPhase::Retreat || peek.cycle.phase==PeekPhase::Expose) {
+  goal=peek.cycle.phase==PeekPhase::Retreat || !peek.hasCover?peek.covered:peek.exposed;
+  if(!PeekRoute(bot,bot->pev->origin,goal)) {
+   peek.cycle.phase=PeekPhase::Idle; peek.nextProbe=now+1; return false;
+  }
+  if((goal-bot->pev->origin).Length2D()<40) bot->Walk();
+  PeekMove(bot,goal);
+ } else if(peek.cycle.phase==PeekPhase::Fire && bot->IsEnemyVisible()
+           && peek.shotClip<0
+           && CompetitiveBotPolicy::RifleTapReady(bot->pev->velocity.Length2D(),
+              bot->pev->punchangle.Length2D(),weapon->m_iShotsFired,true)) {
+  // FAMAS burst mode would emit three shots from a single trigger press.
+  if(weapon->m_iId==WEAPON_FAMAS && (weapon->m_iWeaponState & WPNSTATE_FAMAS_BURST_MODE)) {
+   bot->SecondaryAttack(); return true;
+  }
+  bot->FireWeaponAtEnemy();
+ }
+ return true;
+}
+
+bool RememberEnemy(CCSBot *bot)
+{
+ return Enabled() && bot->GetEnemy() && TargetAllowed(bot->GetEnemy())
+  && CompetitiveBotPolicy::RememberThreat(bot->GetTimeSinceLastSawEnemy());
+}
+bool HoldLastEnemyAngle(CCSBot *bot)
+{
+ if(!RememberEnemy(bot) || bot->IsEnemyVisible() || bot->IsBlind()
+    || !CompetitiveBotPolicy::HoldLostAngle(bot->GetTimeSinceLastSawEnemy())
+    || bot->GetDisposition()==CCSBot::IGNORE_ENEMIES || bot->IsDefusingBomb()
+    || bot->IsEscapingFromBomb() || bot->IsOnLadder() || bot->IsReloading()
+    || bot->GetTask()==CCSBot::PLANT_BOMB || HasHumanOrder(bot)) return false;
+ // A newly visible attacker takes precedence over the old corner.
+ if(bot->GetTimeSinceAttacked()<1 && bot->GetAttacker() && bot->GetAttacker()!=bot->GetEnemy()
+    && bot->IsVisible(bot->GetAttacker(),true)) return false;
+ bot->ClearMovement(); bot->ClearPrimaryAttack(); bot->AimAtEnemy();
+ return true;
+}
+
+void RifleTapRequested(CCSBot *bot)
+{
+ auto &peek=coverPeeks[bot->entindex()]; auto *weapon=bot->GetActiveWeapon();
+ if(peek.cycle.phase==CompetitiveBotPolicy::PeekPhase::Fire && weapon)
+  peek.shotClip=weapon->m_iClip;
+}
+
+void ReleaseRifleTap(CCSBot *bot)
+{
+ auto &peek=coverPeeks[bot->entindex()]; auto *weapon=bot->GetActiveWeapon();
+ // Upkeep runs faster than combat decisions: release before another automatic shot.
+ if(peek.cycle.phase!=CompetitiveBotPolicy::PeekPhase::Idle && peek.shotClip>=0
+    && weapon && weapon->m_iClip<peek.shotClip) {
+  bot->StopRapidFire(); bot->ClearPrimaryAttack();
+ }
+}
+
 bool PauseForTyping(CCSBot *bot)
 {
  if (!Enabled() || !bot || !bot->IsAlive() || Completed() || IsManagingGrenade(bot)
@@ -916,6 +1130,7 @@ bool PauseForTyping(CCSBot *bot)
 
 void Reset()
 {
+ for(auto &peek:coverPeeks) peek=CoverPeek {};
 	LoadCallouts();
  pingComplaintNext=0;for(auto &time:nextSpreeChat)time=0;for(auto &team:placeNext)for(auto &time:team)time=0;
  for(auto &time:lastHumanChat)time=-100;
@@ -938,6 +1153,7 @@ void Reset()
 
 void RoundRestart()
 {
+ for(auto &peek:coverPeeks) peek=CoverPeek {};
 	ResetGrenades();
 	ResetCaptains();
  captainRoundStarted=-1;for(auto &gate:openingPlans)gate=OpeningPlanGate {};

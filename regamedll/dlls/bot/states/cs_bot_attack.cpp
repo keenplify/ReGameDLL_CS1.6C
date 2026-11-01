@@ -364,6 +364,10 @@ void AttackState::OnUpdate(CCSBot *me)
 		return;
 	}
 
+	// A cover cycle owns movement while briefly breaking line of sight.
+	if (CompetitiveBots::UpdateCoverPeek(me))
+		return;
+
 	float notSeenEnemyTime = gpGlobals->time - me->GetLastSawEnemyTimestamp();
 
 	// if we haven't seen our enemy for a moment, continue on if we dont want to fight, or decide to ambush if we do
@@ -385,6 +389,10 @@ void AttackState::OnUpdate(CCSBot *me)
 		{
 			m_isEnemyHidden = true;
 		}
+
+		// Hold the last observed angle briefly instead of abandoning it after 0.1s.
+		if (CompetitiveBots::HoldLastEnemyAngle(me))
+			return;
 
 		if (notSeenEnemyTime > 0.1f)
 		{
@@ -573,6 +581,7 @@ void AttackState::OnUpdate(CCSBot *me)
 // Finish attack
 void AttackState::OnExit(CCSBot *me)
 {
+	CompetitiveBots::BeginCombatMovement(me);
 	me->PrintIfWatched("AttackState:OnExit()\n");
 
 	m_crouchAndHold = false;
