@@ -699,6 +699,7 @@ void CCSBot::Update()
 	if (TheCSBots()->GetElapsedRoundTime() > earliestAutoFollowTime
 		&& GetProfile()->GetTeamwork() > minAutoFollowTeamwork
 		&& CanAutoFollow()
+		&& !CompetitiveBots::CaptainPlanIndependent(this)
 		&& !IsBusy()
 		&& !IsFollowing()
 		&& !GetGameState()->IsAtPlantedBombsite())

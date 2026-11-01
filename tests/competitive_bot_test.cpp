@@ -166,7 +166,27 @@ int main()
   CHECK(CompetitiveExecution::OpeningFireTolerance(500,false,true,mmr)==CompetitiveExecution::FireTolerance(500,false,true));
  }
  CHECK(std::abs(CompetitiveExecution::OpeningDuration(1000)-2.6f)<.0001f);
- CHECK(std::abs(CompetitiveExecution::OpeningDuration(2000)-1.3f)<.0001f);
+ CHECK(std::abs(CompetitiveExecution::OpeningDuration(2000)-1.261f)<.0001f);
+ for(int mmr:{0,500,1000,1100}) {
+  const float original=std::max(.35f,std::min(3.2f,2.6f*std::pow(.5f,(float(mmr)-1000)/1000)));
+  CHECK(std::abs(CompetitiveExecution::OpeningDuration(mmr)-original)<.0001f);
+ }
+ for(int mmr=1101;mmr<5000;++mmr) {
+  const float original=std::max(.35f,std::min(3.2f,2.6f*std::pow(.5f,(float(mmr)-1000)/1000)));
+  CHECK(CompetitiveExecution::OpeningDuration(mmr)<=original);
+  CHECK(CompetitiveExecution::OpeningDuration(mmr)>=original*.9699f);
+ }
+ CHECK(CompetitiveExecution::IndependentPlanChance(-1)==0);
+ CHECK(CompetitiveExecution::IndependentPlanChance(1300)==0);
+ CHECK(std::abs(CompetitiveExecution::IndependentPlanChance(1100)-.2f)<.0001f);
+ CHECK(CompetitiveExecution::IndependentPlanChance(0)==.45f);
+ for(int mmr=0;mmr<2000;++mmr) {
+  CHECK(CompetitiveExecution::IndependentPlanChance(mmr+1)<=CompetitiveExecution::IndependentPlanChance(mmr));
+  CHECK(!CompetitiveExecution::TakesIndependentRoute(mmr,0,true,false));
+  CHECK(!CompetitiveExecution::TakesIndependentRoute(mmr,0,false,true));
+ }
+ CHECK(CompetitiveExecution::TakesIndependentRoute(1100,.19f,false,false));
+ CHECK(!CompetitiveExecution::TakesIndependentRoute(1100,.21f,false,false));
  CHECK(CompetitiveExecution::OpeningDuration(0)==3.2f);
  CHECK(CompetitiveExecution::OpeningDuration(10000)==.35f);
  for(int mmr=0;mmr<10000;mmr+=100)

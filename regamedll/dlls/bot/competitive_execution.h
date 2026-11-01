@@ -27,7 +27,17 @@ inline float OpeningDuration(int mmr) {
  if(!HasRatedAim(mmr))return 0.0f;
  // 1000 MMR baseline; each additional 1000 halves correction time.
  // Continuous scaling avoids artificial skill jumps at rating boundaries.
- return std::max(.35f,std::min(3.2f,2.6f*std::pow(.5f,(float(mmr)-1000.0f)/1000.0f)));
+ // A small correction-time improvement, ramped in above 1100 MMR.
+ const float boost=.03f*std::max(0.0f,std::min(1.0f,(float(mmr)-1100.0f)/50.0f));
+ return std::max(.35f,std::min(3.2f,2.6f*std::pow(.5f,(float(mmr)-1000.0f)/1000.0f)*(1-boost)));
+}
+// One roll per captain plan, never per frame. Unrated bots retain old behavior.
+inline float IndependentPlanChance(int mmr) {
+ if(mmr<0)return 0;
+ return std::max(0.0f,std::min(.45f,(1300.0f-float(mmr))*.001f));
+}
+inline bool TakesIndependentRoute(int mmr,float roll,bool leader,bool bombCarrier) {
+ return !leader && !bombCarrier && roll<IndependentPlanChance(mmr);
 }
 inline float OpeningOffset(int mmr,float elapsed,float range) {
  const float duration=OpeningDuration(mmr);

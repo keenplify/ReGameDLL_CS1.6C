@@ -17,6 +17,7 @@ void ResetTraffic();
 void UpdateTactics(CCSBot *bot);
 void UpdateSpreeReactions();
 bool RoundTacticsAllowed();
+bool CaptainPlanIndependent(CCSBot *bot);
 bool IsRoundAce(CBasePlayer *player);
 bool ReactToSpree(CBasePlayer *player,int kills);
 void TacticsEvent(GameEventType event,CBaseEntity *entity,CBaseEntity *other);

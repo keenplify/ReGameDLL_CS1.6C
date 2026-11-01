@@ -586,3 +586,20 @@ above 30 units/second. The verified Linux x86 run recorded 29 shots/hits, 12 vol
 open-space rifle movement; cover geometry and Windows runtime still need gameplay
 validation. The four CTest suites also pass. Existing instances retain their loaded DLL;
 new instances load the updated provider after deployment.
+
+## Gentle rated aim and captain-plan independence
+
+Native CS 1.6 rated bots correct their opening aim up to 3% sooner, ramping
+continuously from no change at 1100 MMR to the full change at 1150. Existing
+correction-time limits and lower-rating aim remain unchanged.
+
+Captain plans roll one stable independent-route choice per bot per plan:
+20% at 1100 MMR, 30% at 1000, capped at 45% at 850 and below, tapering to
+zero at 1300. Unrated bots retain their prior behavior. Independent bots use
+native autonomous objectives instead of forced captain routes/group following;
+they are excluded from staged-plan gathering counts and automatic human following.
+Leaders, bomb carriers, planted-bomb objectives and explicit individual human
+orders remain protected. Choices survive staged routes and captain replacement,
+and reset with each new plan. These probabilities are tuning values, not measured
+win-rate changes. Automated policy tests and Linux x86 builds cover this change;
+live balance still needs player feedback.

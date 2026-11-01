@@ -3,6 +3,7 @@
 #include "precompiled.h"
 #include "cs_bot_competitive.h"
 #include "competitive_policy.h"
+#include "competitive_execution.h"
 #include "competitive_peek.h"
 #include "competitive_away.h"
 #include "competitive_ping.h"
@@ -398,6 +399,7 @@ struct CaptainPlan {
  int leaderSlot=0,leaderId=0;
  unsigned revision=0, applied[MAX_CLIENTS+1]={};
  int ids[MAX_CLIENTS+1]={};
+ bool independent[MAX_CLIENTS+1]={};
  TeamOrder roles[MAX_CLIENTS+1]={};
  float ready=0,nextDrive=0,stageStarted=0,slowUntil=0;
  bool staged=false;TeamOrder finish=TeamOrder::None;
@@ -474,6 +476,12 @@ bool MakePlan(CBasePlayer *leader,bool human,TeamAllocation allocation,TeamOrder
   }
   if(replacement){next.roles[i]=next.roles[replacement];next.roles[replacement]=TeamOrder::AllMid;}
   else next.roles[i]=allocation.b>allocation.a?TeamOrder::GoB:TeamOrder::GoA;
+ }
+ // Keep each choice stable through staged routes and leader replacements.
+ for(int i=1;i<=gpGlobals->maxClients;++i) {
+  auto *p=Player(i);if(!next.ids[i] || !p || !p->IsBot())continue;
+  auto *bot=static_cast<CCSBot *>(p);
+  next.independent[i]=CompetitiveExecution::TakesIndependentRoute(bot->GetProfile()->GetCompetitiveMmr(),RANDOM_FLOAT(0,1),p==leader,bot->IsCarryingBomb());
  }
  plans[team]=next;return true;
 }
@@ -553,7 +561,7 @@ void MaintainCaptains() {
   if(plan.staged) {
    int members=0,nearby=0;bool bombNearby=true;
    for(int slot=1;slot<=gpGlobals->maxClients;++slot) {
-    auto *p=Player(slot);if(!p || !p->IsAlive() || !p->IsBot() || p->m_iTeam!=team || GETPLAYERUSERID(p->edict())!=plan.ids[slot])continue;
+    auto *p=Player(slot);if(!p || !p->IsAlive() || !p->IsBot() || p->m_iTeam!=team || GETPLAYERUSERID(p->edict())!=plan.ids[slot] || CaptainPlanIndependent(static_cast<CCSBot *>(p)))continue;
     auto *middle=Destination(TeamOrder::AllMid,p->pev->origin);bool near=middle && (*middle->GetCenter()-p->pev->origin).LengthSquared()<400*400;
     ++members;if(near)++nearby;if(static_cast<CCSBot *>(p)->IsCarryingBomb() && !near)bombNearby=false;
    }
@@ -588,6 +596,12 @@ void MaintainCaptains() {
    }
    if((!PlanMember(bot) && !(plan.staged && bot->IsCarryingBomb() && bot->IsAlive())) || (HasHumanOrder(bot) && !plan.human) || bot->IsAttacking() || bot->IsEnemyVisible() || bot->GetTimeSinceAttacked()<2
       || (bot->IsBuying() && bot->CanPlayerBuy(false)) || IsManagingGrenade(bot) || PauseForTyping(bot))continue;
+   if(CaptainPlanIndependent(bot)) {
+    if(plan.applied[i]!=plan.revision) {
+     bot->StopFollowing();bot->Idle();plan.applied[i]=plan.revision;
+    }
+    continue;
+   }
    auto *area=Destination(plan.roles[i],bot->pev->origin);
    if(!area) {if(plan.human && leader && bot!=leader && !bot->IsFollowing())bot->Follow(leader);continue;}
    if((*area->GetCenter()-bot->pev->origin).LengthSquared()<180*180) continue;
@@ -596,7 +610,7 @@ void MaintainCaptains() {
    for(int j=1;j<=gpGlobals->maxClients;++j) {
     auto *q=Player(j);
     if(q && q->IsBot() && q->IsAlive() && q->m_iTeam==team && plan.roles[j]==plan.roles[i]
-       && GETPLAYERUSERID(q->edict())==plan.ids[j] && (!groupLeader || q->pev->frags>groupLeader->pev->frags))groupLeader=static_cast<CCSBot *>(q);
+       && !CaptainPlanIndependent(static_cast<CCSBot *>(q)) && GETPLAYERUSERID(q->edict())==plan.ids[j] && (!groupLeader || q->pev->frags>groupLeader->pev->frags))groupLeader=static_cast<CCSBot *>(q);
    }
    if(groupLeader && groupLeader!=bot && (groupLeader->pev->origin-bot->pev->origin).LengthSquared()>500*500)bot->Follow(groupLeader);
    else {
@@ -622,6 +636,12 @@ bool Word(const char *text, const char *word)
 }
 }
 
+bool CaptainPlanIndependent(CCSBot *bot) {
+ if(!Enabled() || !captainMode.value || !RoundTacticsAllowed() || Completed() || !bot
+    || TheCSBots()->IsBombPlanted() || bot->m_iTeam<1 || bot->m_iTeam>2 || bot->IsCarryingBomb() || HasHumanOrder(bot))return false;
+ const auto &plan=plans[bot->m_iTeam];const int slot=bot->entindex();
+ return plan.active && plan.independent[slot] && plan.ids[slot]==GETPLAYERUSERID(bot->edict()) && slot!=plan.leaderSlot;
+}
 bool RoundTacticsAllowed() {
  // No managed phase cvar in standalone games: retain ordinary round tactics.
  auto *live=CVAR_GET_POINTER("competitive_match_live");
