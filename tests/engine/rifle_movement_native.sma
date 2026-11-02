@@ -14,6 +14,25 @@ new observer,target,phase,attempts,shots,lateShots,hits;
 new Float:start,Float:origin[3],Float:enemy[3];
 new volleys, movedVolleys, shortBursts, movingShots, volleyShots;
 new Float:lastShot,Float:lastVolley[3];
+#if defined RIFLE_BARRIER
+new barriers[2];
+new Float:blockedSince,Float:longestBlocked;
+public add_barriers() {
+ new Float:center[3],Float:mins[3]={-128.0,-4.0,-36.0},Float:maxs[3]={128.0,4.0,96.0};
+ pev(observer,pev_origin,center);
+ for(new i=0;i<2;i++) {
+  barriers[i]=create_entity("info_target");
+  set_pev(barriers[i],pev_classname,"rifle_test_barrier");
+  set_pev(barriers[i],pev_movetype,MOVETYPE_NONE);
+  set_pev(barriers[i],pev_solid,SOLID_BBOX);
+  set_pev(barriers[i],pev_rendermode,kRenderTransTexture);
+  set_pev(barriers[i],pev_renderamt,0.0);
+  new Float:where[3];xs_vec_copy(center,where);where[1]+=i?100.0:-100.0;
+  engfunc(EngFunc_SetSize,barriers[i],mins,maxs);engfunc(EngFunc_SetOrigin,barriers[i],where);
+ }
+ server_print("RIFLE_MOVEMENT transparent solid barriers installed");
+}
+#endif
 public plugin_init() {
  register_plugin("Rifle movement regression","1","16C");
  RegisterHookChain(RG_CBasePlayer_TakeDamage,"on_damage",true);
@@ -68,6 +87,13 @@ public place_bots() {
 }
 public hold_fixture() {
  if(!phase)return;
+#if defined RIFLE_BARRIER
+ new Float:velocity[3];pev(observer,pev_velocity,velocity);velocity[2]=0.0;
+ if((pev(observer,pev_button)&(IN_FORWARD|IN_BACK|IN_MOVELEFT|IN_MOVERIGHT)) && vector_length(velocity)<5.0) {
+  if(blockedSince==0.0)blockedSince=get_gametime();
+  longestBlocked=floatmax(longestBlocked,get_gametime()-blockedSince);
+ } else blockedSince=0.0;
+#endif
  engfunc(EngFunc_SetOrigin,target,enemy);
  new Float:to[3],Float:look[3],Float:where[3];pev(observer,pev_origin,where);xs_vec_sub(where,enemy,to);engfunc(EngFunc_VecToAngles,to,look);look[0]=-look[0];set_pev(target,pev_v_angle,look);set_pev(target,pev_angles,look);set_pev(target,pev_flags,pev(target,pev_flags)|FL_FROZEN);
  new Float:zero[3];set_pev(target,pev_velocity,zero);set_pev(target,pev_health,10000.0);set_pev(observer,pev_health,10000.0);set_member(target,m_flNextAttack,10000.0);
@@ -93,6 +119,9 @@ public after_fire(entity) {
  if(vector_length(velocity)>30.0){movingShots++;server_print("RIFLE_MOVEMENT moving shot t=%.2f speed=%.1f",now-start,vector_length(velocity));}
  volleyShots++;lastShot=now;
  shots++;
+#if defined RIFLE_BARRIER
+ if(shots==1)add_barriers();
+#endif
  if(get_gametime()-start>=10.0)lateShots++;
 }
 public on_damage(victim,inflictor,attacker,Float:damage,bits) {
@@ -101,7 +130,20 @@ public on_damage(victim,inflictor,attacker,Float:damage,bits) {
 public timeout_test(){
  server_print("RIFLE_MOVEMENT shots=%d late_shots=%d hits=%d",shots,lateShots,hits);
  server_print("RIFLE_MOVEMENT volleys=%d moved=%d bursts=%d moving_shots=%d",volleys,movedVolleys,shortBursts,movingShots);
- if(shots>=5 && lateShots>=2 && hits>=2 && movedVolleys>=3 && shortBursts>=1 && movingShots==0)server_print("RIFLE_MOVEMENT PASS movement between accurate volleys");
+ new bool:obstaclesOk=true;
+ new bool:fireOk=movingShots==0;
+#if defined RIFLE_BARRIER
+ fireOk=true; // Stock combat may resume after a blocked managed cycle.
+ obstaclesOk=barriers[0]>0 && barriers[1]>0 && longestBlocked<0.5;
+ server_print("RIFLE_MOVEMENT longest blocked input=%.2f",longestBlocked);
+#endif
+ if(obstaclesOk && shots>=5 && lateShots>=2 && hits>=2 && movedVolleys>=3 && shortBursts>=1 && fireOk) {
+#if defined RIFLE_BARRIER
+  server_print("RIFLE_MOVEMENT PASS obstacle recovery and continued combat");
+#else
+  server_print("RIFLE_MOVEMENT PASS movement between accurate volleys");
+#endif
+ }
  else server_print("RIFLE_MOVEMENT FAIL shots, movement, bursts or stationary-fire requirement");
  server_cmd("quit");
 }

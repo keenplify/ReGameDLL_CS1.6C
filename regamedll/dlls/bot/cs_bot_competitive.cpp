@@ -70,8 +70,9 @@ Slot slots[MAX_CLIENTS + 1];
 bool mobilityDecided[MAX_CLIENTS+1]={}, mobilityPreferred[MAX_CLIENTS+1]={};
 struct CoverPeek {
  CompetitiveBotPolicy::PeekCycle cycle;
+ CompetitiveBotPolicy::PeekProgress progress;
  Vector exposed, covered, enemyEye;
- int enemyId = 0, shotClip = -1, volleySize = 1;
+ int enemyId = 0, shotClip = -1, volleySize = 1, detours = 0;
  float volleyUntil = 0;
  bool hasCover = false;
  float nextProbe = 0, expires = 0;
@@ -978,27 +979,39 @@ bool PeekCovered(CCSBot *bot,const Vector &origin,const Vector &enemyEye)
   origin+Vector(0,0,18)+side*16, origin+Vector(0,0,18)-side*16};
  for(const auto &point:points) {
   TraceResult tr;
-  UTIL_TraceLine(point,enemyEye,ignore_monsters,bot->edict(),&tr);
+  UTIL_TraceLine(point,enemyEye,ignore_monsters,ignore_glass,bot->edict(),&tr);
   if(tr.fStartSolid || tr.fAllSolid || tr.flFraction==1 || (tr.vecEndPos-point).Length()>128) return false;
  }
  return true;
 }
-void PeekMove(CCSBot *bot,const Vector &goal)
+bool PeekMove(CCSBot *bot,const Vector &goal)
 {
  Vector delta=goal-bot->pev->origin; delta.z=0; delta.NormalizeInPlace();
  float yaw=bot->pev->v_angle.y*float(M_PI/180.0);
  float forward=delta.x*std::cos(yaw)+delta.y*std::sin(yaw);
  float left=-delta.x*std::sin(yaw)+delta.y*std::cos(yaw);
- if(forward>0.25f) bot->MoveForward(); else if(forward<-.25f) bot->MoveBackward();
- if(left>0.25f) bot->StrafeLeft(); else if(left<-.25f) bot->StrafeRight();
+ // Movement keys quantize the direction: test that actual corridor as well as
+ // the straight route to the goal, including room to brake before a wall.
+ int f=forward>.25f?1:forward<-.25f?-1:0;
+ int l=left>.25f?1:left<-.25f?-1:0;
+ Vector command(f*std::cos(yaw)-l*std::sin(yaw),
+                f*std::sin(yaw)+l*std::cos(yaw),0);
+ command.NormalizeInPlace();
+ float speed=bot->pev->maxspeed*(bot->IsRunning()?1.0f:.4f);
+ float distance=std::max(24.0f,speed*(g_flBotFullThinkInterval+.1f));
+ if(!PeekRoute(bot,bot->pev->origin,bot->pev->origin+command*distance)) return false;
+ if(f>0) bot->MoveForward(); else if(f<0) bot->MoveBackward();
+ if(l>0) bot->StrafeLeft(); else if(l<0) bot->StrafeRight();
+ return true;
 }
-bool NextStrafe(CCSBot *bot, CoverPeek &peek)
+bool NextStrafe(CCSBot *bot, CoverPeek &peek, bool reverse=false)
 {
  Vector origin=bot->pev->origin;
  if(bot->IsCrouching()) origin.z+=18;
  Vector toward=peek.enemyEye-origin; toward.z=0; toward.NormalizeInPlace();
  Vector side(-toward.y,toward.x,0);
  int first=RANDOM_LONG(0,1)?1:-1;
+ if(reverse) first=DotProduct(peek.covered-origin,side)>0?-1:1;
  float distance=RANDOM_FLOAT(40,96);
  for(float step:{distance,32.0f}) for(int sign:{first,-first}) {
   Vector candidate=origin+side*(sign*step);
@@ -1072,7 +1085,7 @@ bool UpdateCoverPeek(CCSBot *bot)
    if(!found) return false;
   }
   peek.exposed=origin; peek.enemyEye=enemy->EyePosition(); peek.enemyId=enemyId;
-  peek.expires=now+12; peek.shotClip=-1;
+  peek.expires=now+12; peek.shotClip=-1; peek.detours=0; peek.progress.Reset();
   peek.cycle.phase=PeekPhase::Fire; peek.cycle.deadline=now+1.5f;
   peek.volleySize=CompetitiveBotPolicy::RifleVolleySize(range,RANDOM_LONG(0,99));
  }
@@ -1088,11 +1101,12 @@ bool UpdateCoverPeek(CCSBot *bot)
  bool arrived=(goal-bot->pev->origin).Length2D()<10;
  auto previous=peek.cycle.phase;
  if(!peek.cycle.Step(now,arrived,covered,RANDOM_FLOAT(.22f,.38f))) {
-  peek.nextProbe=now+1; return false;
+  peek.nextProbe=now+2; bot->ClearMovement(); bot->ClearPrimaryAttack(); return true;
  }
  if(peek.cycle.phase!=PeekPhase::Fire) peek.shotClip=-1;
+ if(previous!=peek.cycle.phase) peek.progress.Reset();
  if(previous!=PeekPhase::Fire && peek.cycle.phase==PeekPhase::Fire) {
-  peek.expires=now+12;
+  peek.expires=now+12; peek.detours=0;
   peek.volleySize=CompetitiveBotPolicy::RifleVolleySize(
    (peek.enemyEye-bot->pev->origin).Length(),RANDOM_LONG(0,99));
   // No fixed A/D alternation: repeated steps in either direction are possible.
@@ -1104,11 +1118,19 @@ bool UpdateCoverPeek(CCSBot *bot)
  bot->ClearPrimaryAttack();
  if(peek.cycle.phase==PeekPhase::Retreat || peek.cycle.phase==PeekPhase::Expose) {
   goal=peek.cycle.phase==PeekPhase::Retreat || !peek.hasCover?peek.covered:peek.exposed;
-  if(!PeekRoute(bot,bot->pev->origin,goal)) {
-   peek.cycle.phase=PeekPhase::Idle; peek.nextProbe=now+1; return false;
+  float distance=(goal-bot->pev->origin).Length2D();
+  if(distance<24) bot->Walk();
+  if(peek.progress.Stalled(now,distance) || !PeekRoute(bot,bot->pev->origin,goal)
+     || !PeekMove(bot,goal)) {
+   peek.progress.Reset();
+   // Try the opposite safe side once. A failed return to cover becomes ordinary
+   // repositioning; never pretend the replacement endpoint provides cover.
+   if(combatMovement.value && peek.detours++==0 && NextStrafe(bot,peek,true)) {
+    peek.hasCover=false; peek.cycle.Start(now); return true;
+   }
+   // Do not fall through to stock dodge input on the same blocked tick.
+   peek.cycle.phase=PeekPhase::Idle; peek.nextProbe=now+2; return true;
   }
-  if((goal-bot->pev->origin).Length2D()<24) bot->Walk();
-  PeekMove(bot,goal);
  } else if(peek.cycle.phase==PeekPhase::Fire && bot->IsEnemyVisible()
            && bot->pev->velocity.Length2D()<10
            && ((peek.shotClip>=0 && now<peek.volleyUntil)

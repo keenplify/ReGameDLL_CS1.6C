@@ -1575,6 +1575,8 @@ public:
 };
 
 // Functor used with NavAreaBuildPath()
+namespace CompetitiveBots { bool IsBlockedNavEdge(CCSBot *bot,CNavArea *from,CNavArea *to); }
+
 class PathCost
 {
 public:
@@ -1585,6 +1587,7 @@ public:
 	}
 	float operator()(CNavArea *area, CNavArea *fromArea, const CNavLadder *ladder)
 	{
+		if (!ladder && CompetitiveBots::IsBlockedNavEdge(m_bot,fromArea,area)) return -1.0f;
 		const float baseDangerFactor = 100.0f;
 
 		// respond to the danger modulated by our aggression (even super-aggressives pay SOME attention to danger)

@@ -33,6 +33,44 @@ const float updateTimesliceDuration = 0.5f;
 
 unsigned int _generationIndex = 0; // used for iterating nav areas during generation process
 
+namespace {
+// Visibility rays are insufficient for player clips, narrow gaps and fences.
+// Use the crouched player hull so legitimate crouch routes remain learnable.
+bool LearningHullClear(const Vector &from,const Vector &to,edict_t *bot) {
+ edict_t *ignore=bot;
+ Vector start=from;
+ for(int attempt=0;attempt<16;++attempt) {
+  TraceResult tr;
+  UTIL_TraceHull(start,to,ignore_monsters,head_hull,ignore,&tr);
+  if(tr.flFraction==1 && !tr.fStartSolid && !tr.fAllSolid)return true;
+  if(!tr.pHit || tr.pHit==ignore
+     || !IsEntityWalkable(VARS(tr.pHit),WALK_THRU_EVERYTHING))return false;
+  ignore=tr.pHit;
+  Vector direction=to-from;direction.NormalizeInPlace();
+  start=tr.vecEndPos+direction;
+ }
+ return false;
+}
+bool LearningPlayerRoute(const Vector &from,const Vector &to,edict_t *bot) {
+ const Vector halfHull(0,0,18.1f);
+ Vector start=from+halfHull,end=to+halfHull;
+ // The sampled floor is a point; nearby stair treads can be up to StepHeight
+ // higher under the player's footprint. Permit that normal step clearance.
+ if(!LearningHullClear(start,start,bot))start.z+=StepHeight;
+ if(!LearningHullClear(end,end,bot))end.z+=StepHeight;
+ if(!LearningHullClear(start,start,bot) || !LearningHullClear(end,end,bot))return false;
+ if(LearningHullClear(start,end,bot))return true;
+ // Check all three legs of a step/jump, including ceiling and landing clearance.
+ for(float lift:{StepHeight,JumpCrouchHeight}) {
+  float height=Q_max(start.z,end.z)+lift;
+  Vector up(start.x,start.y,height),across(end.x,end.y,height);
+  if(LearningHullClear(start,up,bot) && LearningHullClear(up,across,bot)
+     && LearningHullClear(across,end,bot))return true;
+ }
+ return false;
+}
+}
+
 inline CNavNode *LadderEndSearch(CBaseEntity *pEntity, const Vector *pos, NavDirType mountDir)
 {
 	Vector center = *pos;
@@ -354,6 +392,7 @@ bool CCSBot::LearnStep()
 					walkable = false;
 				}
 #endif
+				if (walkable && !LearningPlayerRoute(from,to,edict()))walkable=false;
 				if (walkable)
 				{
 					// we can move here

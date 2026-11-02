@@ -30,6 +30,8 @@
 #include "cs_bot_competitive.h"
 #include "competitive_traffic.h"
 #include "competitive_policy.h"
+#include "competitive_peek.h"
+#include "competitive_nav_block.h"
 
 // Determine actual path positions bot will move between along the path
 bool CCSBot::ComputePathPositions()
@@ -1103,6 +1105,55 @@ struct PassingState {
  Vector point {0,0,0}, direction {0,0,0};
 };
 PassingState passing[MAX_CLIENTS+1];
+struct NavigationBlock {
+ int user=0;
+ unsigned from=0,to=0;
+ Vector failedGoal {0,0,0}, failedOrigin {0,0,0};
+ float goalUntil=0;
+ CompetitiveBotPolicy::PeekProgress progress;
+ CompetitiveBotPolicy::NavBlockMemory memory;
+};
+NavigationBlock navigationBlocks[MAX_CLIENTS+1];
+NavigationBlock &NavigationState(CCSBot *bot) {
+ auto &state=navigationBlocks[bot->entindex()];
+ int user=GETPLAYERUSERID(bot->edict());
+ if(state.user!=user) {state=NavigationBlock {};state.user=user;}
+ return state;
+}
+bool PermanentBarrier(const TraceResult &tr) {
+ if(tr.flFraction>=1 || tr.fStartSolid || tr.fAllSolid || !tr.pHit || tr.vecPlaneNormal.z>.7f)return false;
+ auto *hit=VARS(tr.pHit);
+ return FClassnameIs(hit,"worldspawn") || FClassnameIs(hit,"func_wall")
+  || FClassnameIs(hit,"func_wall_toggle")
+  || (FClassnameIs(hit,"func_breakable") && hit->takedamage==DAMAGE_NO);
+}
+// Collision, not visibility, determines whether a player can cross a fence/clip wall.
+bool BlockedNavigationStep(CCSBot *bot,const Vector &goal,unsigned from,unsigned to) {
+ auto &state=NavigationState(bot);
+ if(!CompetitiveBots::Enabled() || bot->IsUsingLadder() || bot->IsOnLadder()
+    || bot->IsJumping() || bot->IsNearJump() || !(bot->pev->flags&FL_ONGROUND)
+    || bot->pev->waterlevel>1) {state.progress.Reset();return false;}
+ Vector direction=goal-bot->pev->origin;direction.z=0;
+ float distance=direction.NormalizeInPlace();
+ if(distance<24) {state.progress.Reset();return false;}
+ Vector end=bot->pev->origin+direction*Q_min(distance,48.0f);
+ TraceResult tr;
+ int hull=bot->IsCrouching()?head_hull:human_hull;
+ UTIL_TraceHull(bot->pev->origin,end,ignore_monsters,hull,bot->edict(),&tr);
+ if(!PermanentBarrier(tr)) {state.progress.Reset();return false;}
+ // Allow ordinary steps/stairs; doors and destructible objects are not blacklisted.
+ Vector step(0,0,StepHeight);
+ UTIL_TraceHull(bot->pev->origin+step,end+step,ignore_monsters,hull,bot->edict(),&tr);
+ if(!PermanentBarrier(tr)) {state.progress.Reset();return false;}
+ if(state.from!=from || state.to!=to) {state.progress.Reset();state.from=from;state.to=to;}
+ if(!state.progress.Stalled(gpGlobals->time,distance))return false;
+ state.memory.Add(from,to,gpGlobals->time);state.progress.Reset();
+ if(from==to) {
+  state.failedGoal=bot->GetPathEndpoint();state.failedOrigin=bot->pev->origin;
+  state.goalUntil=gpGlobals->time+20;
+ }
+ return true;
+}
 unsigned TrafficPriority(CBasePlayer *player) {
  if(player->IsBot()) {
   auto *bot=static_cast<CCSBot *>(player);
@@ -1113,7 +1164,13 @@ unsigned TrafficPriority(CBasePlayer *player) {
 }
 }
 
-void CompetitiveBots::ResetTraffic() { for(auto &state:passing)state=PassingState {}; }
+bool CompetitiveBots::IsBlockedNavEdge(CCSBot *bot,CNavArea *from,CNavArea *to) {
+ return Enabled() && from && to && NavigationState(bot).memory.Contains(from->GetID(),to->GetID(),gpGlobals->time);
+}
+void CompetitiveBots::ResetTraffic() {
+ for(auto &state:passing)state=PassingState {};
+ for(auto &state:navigationBlocks)state=NavigationBlock {};
+}
 
 bool CCSBot::IsHeadOnFriend(CBasePlayer *other,const Vector *goalPos) const
 {
@@ -1592,6 +1649,12 @@ CCSBot::PathResult CCSBot::UpdatePathMovement(bool allowSpeedChange)
 		UTIL_DrawBeamPoints(pev->origin, adjustedGoal + Vector(0, 0, 50), 1, 255, 0, 255);
 	}
 
+ // A stale nav connection can cross a solid fence or invisible player clip.
+ // Remember the failed direction briefly so the next A* search can route around it.
+ if(BlockedNavigationStep(this,m_goalPosition,m_path[Q_max(0,m_pathIndex-1)].area->GetID(),
+                          m_path[m_pathIndex].area->GetID())) {
+  ClearMovement();ResetStuckMonitor();DestroyPath();return PATH_FAILURE;
+ }
 	if (YieldToFriend(&m_goalPosition)) return PROGRESSING;
 
 	// dont use adjustedGoal, as it can vary wildly from the feeler adjustment
@@ -1751,6 +1814,14 @@ bool CCSBot::ComputePath(CNavArea *goalArea, const Vector *goal, RouteType route
 	else
 		GetGroundHeight(&pathEndPosition, &pathEndPosition.z);
 
+ // An area that straddles an obstacle must not keep producing the same trivial
+ // route. Only reject that nearby endpoint, not other destinations in the area.
+ auto &blocked=NavigationState(this);
+ if(CompetitiveBots::Enabled() && blocked.goalUntil>gpGlobals->time
+    && blocked.goalUntil-gpGlobals->time<=20
+    && (pathEndPosition-blocked.failedGoal).LengthSquared()<64*64
+    && (pev->origin-blocked.failedOrigin).LengthSquared()<128*128)return false;
+
 	// if we are already in the goal area, build trivial path
 	if (startArea == goalArea)
 	{
@@ -1783,6 +1854,7 @@ bool CCSBot::ComputePath(CNavArea *goalArea, const Vector *goal, RouteType route
 
 	if (count == 1)
 	{
+  if(CompetitiveBots::Enabled() && !pathToGoalExists)return false;
 		BuildTrivialPath(&pathEndPosition);
 		return true;
 	}

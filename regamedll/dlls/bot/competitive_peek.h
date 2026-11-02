@@ -30,6 +30,18 @@ struct PeekCycle {
   return phase!=PeekPhase::Idle;
  }
 };
+// Track progress toward the current leg, not animation or requested movement.
+struct PeekProgress {
+ float bestDistance=0, since=0;
+ bool active=false;
+ void Reset() { active=false; }
+ bool Stalled(float now,float distance) {
+  if(!active || distance<bestDistance-3 || now<since) {
+   active=true; bestDistance=distance; since=now;
+  }
+  return now-since>=0.35f;
+ }
+};
 inline bool RememberThreat(float age) { return age>=0 && age<6.0f; }
 inline bool HoldLostAngle(float age) { return age>=0 && age<1.25f; }
 // Longer ranges favor taps; close rifle duels mix taps and two/three-shot bursts.

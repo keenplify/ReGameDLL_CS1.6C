@@ -603,3 +603,57 @@ orders remain protected. Choices survive staged routes and captain replacement,
 and reset with each new plan. These probabilities are tuning values, not measured
 win-rate changes. Automated policy tests and Linux x86 builds cover this change;
 live balance still needs player feedback.
+
+
+### Solid-barrier navigation regeneration (2026-11-02)
+
+Learning now supplements its point traces with a crouched player hull at both
+endpoints and along each connection. A clear visual ray alone does not prove
+that a player fits. Normal step-height clearance accounts for stairs under the
+player's footprint; raised step/jump routes check ascent, crossing and landing.
+Doors and damageable breakables retain the existing walk-through policy.
+
+Regenerated matching BSPs in isolated Linux x86 servers:
+
+| Map | Areas | Spawn points | Bombsites | Unreachable spawn/bombsite pairs |
+| --- | ---: | ---: | ---: | ---: |
+| de_downtown_csneo | 557 | 47 | 2 | 0 |
+| de_mirage | 554 | 20 | 2 | 0 |
+| de_tuscan | 495 | 24 | 2 | 0 |
+
+The Downtown mesh no longer overlaps the rectangular invisible T-spawn barrier
+(model *101, x -1800..-1332, y -1681..-1644). `tools/audit-navigation.py NAV BSP`
+checks NAV parsing, BSP size, adjacency references and spawn/objective reachability;
+it also checks this known Downtown barrier. These graph checks do not establish
+that every connection on every map is physically traversable. Regenerated files,
+BSP hashes and NAV hashes are recorded in the backend source asset manifest.
+
+Runtime recovery also remembers a repeatedly blocked navigation edge for twenty
+seconds per bot, then retries it. Doors, damageable breakables, steps and intended
+jumps are exempt from that detector. Failed same-area endpoints have a local,
+expiring exclusion rather than disabling an entire area. An unreachable A* goal
+must not fall back to a direct one-area path through the obstruction.
+
+Combat strafes check the actual movement-key direction in addition to the intended
+endpoint, stop on lack of progress, and try the opposite safe side once. Transparent
+geometry does not count as opaque cover. `rifle_barrier_native.sma` adds invisible
+solid obstacles during a duel and checks continued movement/combat without sustained
+blocked input; stock fallback fire is allowed in this obstacle fixture. The separate
+open-space fixture retains its stationary-fire requirement. Both ran successfully
+before the learning-only change; the final native build and four CTest suites pass.
+
+Generated assets are prepared locally. Existing live servers and persistent remote
+NAV caches have not been replaced by this regeneration.
+
+
+Mirage T-spawn fence verification: the masked barbed-wire models *61/*62
+(x 1001..1003, y -236..-56 and -48..132, z 24..120) are visual illusionaries
+backed by BSP player collision. `mirage_spawn_fence_native.sma` tested four
+crossings with the real crouched player hull: all blocked at fraction 0.249,
+with no start-solid or all-solid false positives. The old 671-area NAV had four
+areas overlapping those sections and four directed connections crossing them.
+The regenerated 554-area NAV has zero such overlaps/crossings and retains all
+20 spawn points' routes to both bombsites. The audit tool now rejects the old
+mesh and passes the replacement for this specific fence. This is geometry and
+navigation-graph verification, not a claim that every combat movement has been
+playtested at the fence. The replacement remains local until deployment.

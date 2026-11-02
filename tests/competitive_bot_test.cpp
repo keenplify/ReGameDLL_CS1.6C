@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "competitive_policy.h"
 #include "competitive_peek.h"
+#include "competitive_nav_block.h"
 #include "competitive_idle.h"
 #include "competitive_away.h"
 #include "competitive_arena_spread.h"
@@ -59,6 +60,26 @@ int main()
   int roles[3]={};
   for(int roll=0;roll<100;++roll) ++roles[CompetitiveBuyRole(roll)];
   CHECK(roles[0]==85 && roles[1]==10 && roles[2]==5);
+  NavBlockMemory blocks;
+  blocks.Add(1,2,10);
+  CHECK(blocks.Contains(1,2,10));
+  CHECK(!blocks.Contains(2,1,10)); // do not poison the reverse route
+  CHECK(!blocks.Contains(1,3,10)); // alternatives remain available
+  CHECK(!blocks.Contains(1,2,30)); // moving barriers can be retried
+  CHECK(!blocks.Contains(1,2,0)); // reset map clock
+  blocks.Add(3,3,10);
+  CHECK(!blocks.Contains(3,3,10)); // do not disable a whole nav area
+  PeekProgress progress;
+  CHECK(!progress.Stalled(10,60));
+  CHECK(!progress.Stalled(10.2f,59));
+  CHECK(progress.Stalled(10.36f,59)); // blocked despite movement input
+  progress.Reset();
+  CHECK(!progress.Stalled(11,60));
+  CHECK(!progress.Stalled(11.3f,50)); // real progress renews deadline
+  CHECK(!progress.Stalled(11.6f,40));
+  CHECK(progress.Stalled(12,41)); // sliding sideways is not progress
+  progress.Reset();
+  CHECK(!progress.Stalled(13,80)); // new leg gets its own budget
   PeekCycle peek;
   peek.Start(10);
   CHECK(peek.Step(10.2f,true,false,.3f));
