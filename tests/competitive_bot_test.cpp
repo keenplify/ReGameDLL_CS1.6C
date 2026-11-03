@@ -5,6 +5,7 @@
 #include "competitive_idle.h"
 #include "competitive_away.h"
 #include "competitive_arena_spread.h"
+#include "competitive_casual.h"
 #include "competitive_team_order.h"
 #include "competitive_team_allocation.h"
 #include "competitive_execution.h"
@@ -101,6 +102,19 @@ int main()
   CHECK(peek.Step(20.1f,true,true,.3f));
   CHECK(!peek.Step(20.2f,true,false,.3f)); // cover no longer protects us
  }
+ CHECK(CompetitiveCasual::Enabled(1) && CompetitiveCasual::Enabled(2));
+ CHECK(!CompetitiveCasual::Enabled(0));
+ CHECK(CompetitiveCasual::SkillLevel(800,2)==0);
+ CHECK(CompetitiveCasual::SkillLevel(1400,2)==2);
+ CHECK(CompetitiveCasual::SkillLevel(2000,2)==4);
+ CHECK(CompetitiveCasual::SkillLevel(-1,2)==2);
+ int camps=0;
+ for(int roll=0;roll<100;++roll) {
+  float next=0;
+  if(CompetitiveCasual::CampDuration(10,next,roll)>0)++camps;
+  CHECK(CompetitiveCasual::CampDuration(11,next,0)==0);
+ }
+ CHECK(camps==10);
  CHECK(arenaSpreadAllowed(2,true,false,false));
  CHECK(!arenaSpreadAllowed(0,true,false,false));
  CHECK(!arenaSpreadAllowed(1,true,false,false));

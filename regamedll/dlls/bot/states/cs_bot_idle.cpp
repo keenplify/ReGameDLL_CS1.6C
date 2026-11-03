@@ -106,8 +106,8 @@ void IdleState::OnUpdate(CCSBot *me)
 	const float offenseSniperCampChance = 10.0f;
 
 	// if we were following someone, continue following them
-	// Arena bots choose separate roaming lanes unless a human requested support.
-	if (CompetitiveBots::ArenaSpreadEnabled() && !CompetitiveBots::HasHumanOrder(me)
+	// Casual bots keep hunting instead of entering map-objective camping loops.
+	if (CompetitiveBots::CasualRoamingEnabled(me)
 		&& !me->IsCarryingBomb() && !me->m_bIsVIP && !me->GetHostageEscortCount())
 	{
 		me->StopFollowing();

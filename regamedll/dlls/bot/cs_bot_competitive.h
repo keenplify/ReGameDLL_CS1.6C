@@ -42,6 +42,8 @@ bool RequestedDrop(CCSBot *bot,CBasePlayer *human,const char *requested);
 void ProtectHumanOrder(CCSBot *bot,float duration=12);
 bool HasHumanOrder(CCSBot *bot);
 bool ArenaSpreadEnabled();
+bool CasualRoamingEnabled(CCSBot *bot);
+float CasualCampDuration(CCSBot *bot);
 CNavArea *ArenaHuntArea(CCSBot *bot);
 void RegisterGrenadeCVars();
 void ResetGrenades(bool map=false);

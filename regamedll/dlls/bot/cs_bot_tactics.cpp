@@ -8,6 +8,7 @@
 #include "competitive_score_reaction.h"
 #include "competitive_spree.h"
 #include "competitive_arena_spread.h"
+#include "competitive_casual.h"
 #include <cmath>
 namespace CompetitiveBots {
 namespace {
@@ -23,7 +24,7 @@ struct State {
  Vector progressOrigin {0,0,0};
  float recoilUntil=0,acquired=0,nextSample=0,nextTick=0,nextCover=0,nextSupport=0,nextPlant=0,avoidUntil=0;
  float nextLockCheck=0,lastSeen=0,openingSide=1;
- float orderUntil=0,streakDue=0;
+ float orderUntil=0,streakDue=0,nextCampDecision=0;
  Vector sampled {0,0,0},avoid {0,0,0};
  HitMemory hits[MAX_CLIENTS+1];
 };
@@ -36,7 +37,11 @@ float nextBanter=0;
 float nextProgressCheck=0,matchProgress=0;
 CBasePlayer *Player(int i) {auto *p=i>0 && i<=gpGlobals->maxClients?UTIL_PlayerByIndex(i):nullptr;return p && p->IsPlayer() && !p->IsDormant()?static_cast<CBasePlayer *>(p):nullptr;}
 State &Get(CCSBot *b) {auto &s=states[b->entindex()];int id=GETPLAYERUSERID(b->edict());if(s.id!=id){s=State {};s.id=id;}return s;}
-int Level() {if(level.value>=0)return int(level.value);return int(cv_bot_difficulty.value)*4/3;}
+int Level(CCSBot *b) {
+ const int fallback=level.value>=0?int(level.value):int(cv_bot_difficulty.value)*4/3;
+ return CompetitiveCasual::Enabled(CVAR_GET_FLOAT("competitive_game_mode"))
+  ? CompetitiveCasual::SkillLevel(b->GetProfile()->GetCompetitiveMmr(),fallback) : fallback;
+}
 bool Ffa() {return CSGameRules()->IsFreeForAll();}
 float Progress() {
  if(gpGlobals->time<nextProgressCheck)return matchProgress;
@@ -57,7 +62,7 @@ bool LockedIn(CCSBot *b) {
  s.nextLockCheck=gpGlobals->time+.2f;
  const float progress=Progress();
  if(!s.lockPlanned) {
-  s.lockWindow=CompetitiveLockIn::Plan(Level(),progress,RANDOM_FLOAT(0,1),RANDOM_FLOAT(0,1),RANDOM_FLOAT(0,1));
+  s.lockWindow=CompetitiveLockIn::Plan(Level(b),progress,RANDOM_FLOAT(0,1),RANDOM_FLOAT(0,1),RANDOM_FLOAT(0,1));
   s.lockPlanned=true;
  }
  s.lockActive=CompetitiveLockIn::Active(s.lockWindow,progress);
@@ -83,6 +88,13 @@ void ResetTactics(bool map) {
 }
 void ProtectHumanOrder(CCSBot *b,float seconds){Get(b).orderUntil=gpGlobals->time+seconds;}
 bool HasHumanOrder(CCSBot *b){return gpGlobals->time<Get(b).orderUntil;}
+bool CasualRoamingEnabled(CCSBot *b) {
+ return Enabled() && CompetitiveCasual::Enabled(CVAR_GET_FLOAT("competitive_game_mode"))
+  && !Busy(b) && !HasHumanOrder(b) && !SimulatedAway(b);
+}
+float CasualCampDuration(CCSBot *b) {
+ return CompetitiveCasual::CampDuration(gpGlobals->time,Get(b).nextCampDecision,RANDOM_LONG(0,99));
+}
 bool ArenaSpreadEnabled() {return Enabled() && CVAR_GET_FLOAT("competitive_game_mode")==2;}
 CNavArea *ArenaHuntArea(CCSBot *b) {
  if(!arenaSpreadAllowed(CVAR_GET_FLOAT("competitive_game_mode"),Enabled(),Busy(b),HasHumanOrder(b))
@@ -123,15 +135,15 @@ void Notice(CCSBot *b,CBasePlayer *target) {
  auto &s=Get(b);int id=GETPLAYERUSERID(target->edict());
  if(s.targetId!=id || s.targetSlot!=target->entindex() || (CompetitiveExecution::HasRatedAim(b->GetProfile()->GetCompetitiveMmr()) && gpGlobals->time-s.lastSeen>.5f)) {
   s.targetId=id;s.targetSlot=target->entindex();s.acquired=gpGlobals->time;s.hasSample=false;
-  auto p=CompetitiveExecution::Get(Level());s.early=RANDOM_LONG(0,99)<p.early;s.head=RANDOM_FLOAT(0,1)<p.skill*.65f;
+  auto p=CompetitiveExecution::Get(Level(b));s.early=RANDOM_LONG(0,99)<p.early;s.head=RANDOM_FLOAT(0,1)<p.skill*.65f;
   s.openingSide=RANDOM_LONG(0,1)?1.0f:-1.0f;
   if(CompetitiveExecution::HasRatedAim(b->GetProfile()->GetCompetitiveMmr())){s.early=true;}
  }
  s.lastSeen=gpGlobals->time;
 }
 bool IsLockedIn(CCSBot *b) { return LockedIn(b); }
-float ExecutionSkill(CCSBot *b){if(!Enabled())return b->GetProfile()->GetSkill();float skill=CompetitiveExecution::Get(Level()).skill;return LockedIn(b)?std::min(.99f,skill+.08f):skill;}
-float ExecutionReaction(CCSBot *b){if(!Enabled())return b->GetProfile()->GetReactionTime();float reaction=CompetitiveExecution::Reaction(Level(),Get(b).early);return LockedIn(b)?std::max(.09f,reaction*.8f):reaction;}
+float ExecutionSkill(CCSBot *b){if(!Enabled())return b->GetProfile()->GetSkill();float skill=CompetitiveExecution::Get(Level(b)).skill;return LockedIn(b)?std::min(.99f,skill+.08f):skill;}
+float ExecutionReaction(CCSBot *b){if(!Enabled())return b->GetProfile()->GetReactionTime();float reaction=CompetitiveExecution::Reaction(Level(b),Get(b).early);return LockedIn(b)?std::max(.09f,reaction*.8f):reaction;}
 bool AimAtHead(CCSBot *b){
  Notice(b,b->GetEnemy());
  if(!Enabled())return true;
@@ -140,7 +152,7 @@ bool AimAtHead(CCSBot *b){
 }
 void SampleAim(CCSBot *b,Vector &aim){
  if(!Enabled() || !b->IsEnemyVisible())return;Notice(b,b->GetEnemy());auto &s=Get(b);
- if(!s.hasSample || gpGlobals->time>=s.nextSample){s.sampled=aim;s.hasSample=true;s.nextSample=gpGlobals->time+CompetitiveExecution::Get(Level()).tracking*(LockedIn(b)?.8f:1.0f);}
+ if(!s.hasSample || gpGlobals->time>=s.nextSample){s.sampled=aim;s.hasSample=true;s.nextSample=gpGlobals->time+CompetitiveExecution::Get(Level(b)).tracking*(LockedIn(b)?.8f:1.0f);}
  aim=s.sampled;
  if(b->IsUsingKnife() || b->IsUsingGrenade())return;
  const int mmr=b->GetProfile()->GetCompetitiveMmr();
@@ -149,16 +161,16 @@ void SampleAim(CCSBot *b,Vector &aim){
  const float offset=CompetitiveExecution::OpeningOffset(mmr,gpGlobals->time-s.acquired,range)*s.openingSide;
  aim.x-=toward.y*offset;aim.y+=toward.x*offset;
 }
-float AimError(CCSBot *b,float nativeError){if(!Enabled())return nativeError;auto &s=Get(b);auto p=CompetitiveExecution::Get(Level());float error=CompetitiveExecution::AimOffset(Level(),nativeError,s.early && gpGlobals->time-s.acquired<p.settle);return LockedIn(b)?std::max(.25f,error*.8f):error;}
-bool EarlyFire(CCSBot *b){if(!Enabled() || b->IsUsingSniperRifle() || b->IsUsingKnife())return false;auto &s=Get(b);return s.early && gpGlobals->time-s.acquired>=ExecutionReaction(b) && gpGlobals->time-s.acquired<(CompetitiveExecution::HasRatedAim(b->GetProfile()->GetCompetitiveMmr())?CompetitiveExecution::OpeningDuration(b->GetProfile()->GetCompetitiveMmr()):CompetitiveExecution::Get(Level()).settle);}
+float AimError(CCSBot *b,float nativeError){if(!Enabled())return nativeError;auto &s=Get(b);auto p=CompetitiveExecution::Get(Level(b));float error=CompetitiveExecution::AimOffset(Level(b),nativeError,s.early && gpGlobals->time-s.acquired<p.settle);return LockedIn(b)?std::max(.25f,error*.8f):error;}
+bool EarlyFire(CCSBot *b){if(!Enabled() || b->IsUsingSniperRifle() || b->IsUsingKnife())return false;auto &s=Get(b);return s.early && gpGlobals->time-s.acquired>=ExecutionReaction(b) && gpGlobals->time-s.acquired<(CompetitiveExecution::HasRatedAim(b->GetProfile()->GetCompetitiveMmr())?CompetitiveExecution::OpeningDuration(b->GetProfile()->GetCompetitiveMmr()):CompetitiveExecution::Get(Level(b)).settle);}
 bool RecoverRecoil(CCSBot *b) {
  if(!Enabled() || !b->IsEnemyVisible() || b->IsUsingPistol() || b->IsUsingSniperRifle() || b->IsUsingKnife() || b->IsUsingGrenade())return false;
  auto *weapon=b->GetActiveWeapon();if(!weapon || weapon->m_iId==WEAPON_M3 || weapon->m_iId==WEAPON_XM1014)return false;
  auto &s=Get(b);if(gpGlobals->time<s.recoilUntil)return true;
- if(Level()<=1 && s.early && gpGlobals->time-s.acquired<CompetitiveExecution::Get(Level()).settle)return false;
+ if(Level(b)<=1 && s.early && gpGlobals->time-s.acquired<CompetitiveExecution::Get(Level(b)).settle)return false;
  float punch=std::sqrt(b->pev->punchangle.x*b->pev->punchangle.x+b->pev->punchangle.y*b->pev->punchangle.y);
  if(punch<3.5f)return false;
- s.recoilUntil=gpGlobals->time+CompetitiveExecution::Get(Level()).tracking+.16f;return true;
+ s.recoilUntil=gpGlobals->time+CompetitiveExecution::Get(Level(b)).tracking+.16f;return true;
 }
 bool WaitForTeamBuy(CCSBot *b) {
  if(!Enabled() || !tactics.value || Ffa() || b->m_iTeam<1 || b->m_iTeam>2)return false;

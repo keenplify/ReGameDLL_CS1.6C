@@ -27,6 +27,7 @@
 */
 
 #include "precompiled.h"
+#include "../cs_bot_competitive.h"
 
 // Begin moving to a nearby hidey-hole.
 // NOTE: Do not forget this state may include a very long "move-to" time to get to our hidey spot!
@@ -56,6 +57,13 @@ void HideState::OnEnter(CCSBot *me)
 		m_holdPositionTime = 0.0f;
 	}
 
+	if (CompetitiveBots::CasualRoamingEnabled(me))
+	{
+		m_duration = CompetitiveBots::CasualCampDuration(me);
+		m_holdPositionTime = m_duration;
+		m_isHoldingPosition = m_duration > 0;
+	}
+
 	m_heardEnemy = false;
 	m_firstHeardEnemyTime = 0.0f;
 	m_retry = 0;
@@ -70,6 +78,14 @@ void HideState::OnEnter(CCSBot *me)
 // NOTE: Do not forget this state may include a very long "move-to" time to get to our hidey spot!
 void HideState::OnUpdate(CCSBot *me)
 {
+	// Keep reload cover and explicit human orders; otherwise return to roaming promptly.
+	if (CompetitiveBots::CasualRoamingEnabled(me) && !me->IsActiveWeaponReloading()
+		&& gpGlobals->time - me->GetStateTimestamp() >= m_duration)
+	{
+		me->Hunt();
+		return;
+	}
+
 	// wait until finished reloading to leave hide state
 	if (!me->IsActiveWeaponReloading())
 	{

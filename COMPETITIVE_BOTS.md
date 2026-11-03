@@ -657,3 +657,9 @@ The regenerated 554-area NAV has zero such overlaps/crossings and retains all
 mesh and passes the replacement for this specific fence. This is geometry and
 navigation-graph verification, not a claim that every combat movement has been
 playtested at the fence. The replacement remains local until deployment.
+
+### Casual roaming and individual ratings
+
+Managed FFA and Arena prefer roaming over map-objective camping. A discretionary hide gets a 10% chance, at most one decision per bot every 20 seconds, and lasts at most five seconds. Reload cover, explicit human orders, and the server-owned simulated-away lease remain separate. These changes target Linux x86 CS 1.6 native bots; ordinary competitive modes retain their existing behavior.
+
+In FFA/Arena, each rated bot uses its own CompetitiveMMR across five skill bands spanning 800–2000, rather than the lobby-wide difficulty. Unrated profiles and other modes preserve the configured fallback difficulty.
