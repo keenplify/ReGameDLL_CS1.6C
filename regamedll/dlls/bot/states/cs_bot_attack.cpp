@@ -498,8 +498,17 @@ void AttackState::OnUpdate(CCSBot *me)
 		me->StandUp();
 	}
 
+	const bool approachingWithPistol = CompetitiveBots::ApproachWithPistol(me);
+	if (approachingWithPistol)
+		m_crouchAndHold = false;
+
 	if (gpGlobals->time > m_reacquireTimestamp)
 		me->FireWeaponAtEnemy();
+
+	// The checked approach owns movement; stock dodging must not add an
+	// unchecked diagonal or make a low-skill bot back away at pistol range.
+	if (approachingWithPistol)
+		return;
 
 	// do dodge behavior
 	// If sniping or crouching, stand still.

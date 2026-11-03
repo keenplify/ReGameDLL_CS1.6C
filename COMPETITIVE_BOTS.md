@@ -663,3 +663,38 @@ playtested at the fence. The replacement remains local until deployment.
 Managed FFA and Arena prefer roaming over map-objective camping. A discretionary hide gets a 10% chance, at most one decision per bot every 20 seconds, and lasts at most five seconds. Reload cover, explicit human orders, and the server-owned simulated-away lease remain separate. These changes target Linux x86 CS 1.6 native bots; ordinary competitive modes retain their existing behavior.
 
 In FFA/Arena, each rated bot uses its own CompetitiveMMR across five skill bands spanning 800–2000, rather than the lobby-wide difficulty. Unrated profiles and other modes preserve the configured fallback difficulty.
+
+### Pistol approach preference
+
+With competitive combat movement enabled, bots using a pistol prefer closing on a
+currently visible enemy until they are within 400 game units, while retaining normal
+firing/reaction checks. This applies at every skill level. The approach checks both
+the standing hull corridor and floor support, then validates the actual view-relative
+movement direction. Stock dodge movement cannot add an unchecked diagonal during it.
+Reloading, blindness, ladders, deep water, shields, human orders, held/sniping positions,
+and protected objective tasks retain their existing behavior. Hidden targets are not
+tracked by this approach. Live map/combat balance still needs in-game verification.
+
+### Dropped C4 recovery priority
+
+During live bomb-defusal rounds, a reachable dropped C4 takes priority over captain
+site routes. Once per second, the coordinator chooses the nearest available Terrorist
+bot by navigation travel distance, preserving an existing fetch instead of resetting
+its path. Combat, explicit human orders and grenade handling remain protected. Captain
+routing, tactical idle/save decisions and delayed watch-position moves do not replace
+an active fetch. Idle Terrorists check the loose bomb before sniper camping. Fetch
+path failure returns to hunting without falling through and immediately undoing it;
+the target uses the nearest navigation area for drops near area edges. This applies
+to de_dust2 and other defusal maps; live pathing still needs in-game verification.
+
+### Site camping limit
+
+Without enemy contact, bots stay near a bombsite for at most 30 seconds before
+rotating to the other reachable site. The vacated site has a 60-second camping
+cooldown. Seeing/fighting an enemy or taking recent damage resets the timer and
+permits staying despite that cooldown. Rotation updates the captain route so it
+cannot immediately send the bot back. Bomb recovery, carrying/planting C4,
+defusing, planted-bomb defense and explicit human orders take priority. Site
+identity uses existing labelled NAV destinations and the 400-unit site vicinity;
+no alternate reachable site means no forced movement. Live map verification remains
+necessary.

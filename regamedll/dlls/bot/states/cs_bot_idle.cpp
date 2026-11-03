@@ -212,6 +212,13 @@ void IdleState::OnUpdate(CCSBot *me)
 			}
 			else
 			{
+				// if the bomb is loose (on the ground), go get it
+				if (me->NoticeLooseBomb())
+				{
+					me->FetchBomb();
+					return;
+				}
+
 				// small chance of sniper camping on offense, if we aren't carrying the bomb
 				if (me->GetFriendsRemaining() && me->IsSniper() && RANDOM_FLOAT(0, 100.0f) < offenseSniperCampChance)
 				{
@@ -219,13 +226,6 @@ void IdleState::OnUpdate(CCSBot *me)
 					me->Hide(me->GetLastKnownArea(), RANDOM_FLOAT(10.0f, 30.0f), sniperHideRange);
 					me->SetDisposition(CCSBot::OPPORTUNITY_FIRE);
 					me->PrintIfWatched("Sniping!\n");
-					return;
-				}
-
-				// if the bomb is loose (on the ground), go get it
-				if (me->NoticeLooseBomb())
-				{
-					me->FetchBomb();
 					return;
 				}
 

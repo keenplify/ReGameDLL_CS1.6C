@@ -1,3 +1,4 @@
+#include "competitive_site_camp.h"
 // SPDX-License-Identifier: MIT
 #include "competitive_policy.h"
 #include "competitive_peek.h"
@@ -23,6 +24,24 @@ int main()
 {
 	int failures = 0;
 #define CHECK(value) do { if (!(value)) { std::fprintf(stderr, "line %d: %s\n", __LINE__, #value); ++failures; } } while (0)
+ {
+  CompetitiveSiteCamp camp;
+  CHECK(camp.Update(0,1,true,false)==0);
+  CHECK(camp.Update(29,1,true,false)==0);
+  CHECK(camp.Update(30,1,true,false)==2);
+  camp.Rotated(30);
+  CHECK(camp.Update(40,1,true,false)==2); // returning early cannot restart a camp
+  CHECK(camp.Update(41,1,true,true)==0); // contact overrides cooldown
+  CHECK(camp.Update(70,1,true,false)==0);
+  CHECK(camp.Update(71,1,true,false)==2);
+  camp.Rotated(71);
+  CHECK(camp.Update(72,0,true,false)==0); // transit does not count as camping
+  CHECK(camp.Update(80,2,true,false)==0);
+  CHECK(camp.Update(110,2,true,false)==1);
+  CHECK(camp.Update(111,2,false,false)==0); // planted bomb/objective is protected
+  CHECK(camp.Update(140,2,true,false)==0);
+  CHECK(camp.Update(169,2,true,false)==0);
+ }
  {
   CompetitiveIdleRecovery idle;
   CHECK(!idle.Update(10,true,false));

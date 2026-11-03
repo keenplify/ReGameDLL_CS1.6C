@@ -50,13 +50,13 @@ void FetchBombState::OnUpdate(CCSBot *me)
 		if (!me->HasPath())
 		{
 			// build a path to the bomb
-			if (me->ComputePath(TheNavAreaGrid.GetNavArea(&pBomb->pev->origin), &pBomb->pev->origin, SAFEST_ROUTE) == false)
+			if (me->ComputePath(TheNavAreaGrid.GetNearestNavArea(&pBomb->pev->origin), &pBomb->pev->origin, SAFEST_ROUTE) == false)
 			{
 				me->PrintIfWatched("Fetch bomb pathfind failed\n");
 
 				// go Hunt instead of Idle to prevent continuous re-pathing to inaccessible bomb
 				me->Hunt();
-				//return;
+				return;
 			}
 		}
 	}

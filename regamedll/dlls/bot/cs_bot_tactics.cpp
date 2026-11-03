@@ -68,7 +68,7 @@ bool LockedIn(CCSBot *b) {
  s.lockActive=CompetitiveLockIn::Active(s.lockWindow,progress);
  return s.lockActive;
 }
-bool Busy(CCSBot *b) {return b->IsDefusingBomb() || b->IsEscapingFromBomb() || b->m_bIsVIP || b->IsCarryingBomb()
+bool Busy(CCSBot *b) {return IsRotatingSites(b) || b->IsFetchingBomb() || b->IsDefusingBomb() || b->IsEscapingFromBomb() || b->m_bIsVIP || b->IsCarryingBomb()
  || b->GetTask()==CCSBot::PLANT_BOMB || b->GetTask()==CCSBot::RESCUE_HOSTAGES || IsManagingGrenade(b);}
 bool Path(CCSBot *b,const Vector &point) {
  auto *a=TheNavAreaGrid.GetNearestNavArea(&point);if(!a || !b->GetLastKnownArea())return false;

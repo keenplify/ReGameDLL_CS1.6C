@@ -1,3 +1,4 @@
+#include "competitive_site_camp.h"
 // SPDX-License-Identifier: MIT
 // Team phrase parser ported from keenplify/yapb-comms at 76b82b5 (MIT).
 #include "precompiled.h"
@@ -504,6 +505,81 @@ bool HumanCaptainCall(CBasePlayer *human,const char *text) {
  if(bot && Queue(bot,human,true,accepted?"roger, moving together":"that split isn't available",true)) State(bot).reply.captainReply=true;
  return true;
 }
+// Recover the dropped objective before sending the team around another site route.
+// Terrorists already know the loose C4 position through their radar.
+void MaintainBombRecovery() {
+ if(!RoundTacticsAllowed() || Completed() || CSGameRules()->IsFreezePeriod()
+  || CSGameRules()->m_iRoundWinStatus!=WINSTATUS_NONE
+  || TheCSBots()->GetScenario()!=CCSBotManager::SCENARIO_DEFUSE_BOMB
+  || TheCSBots()->IsBombPlanted())return;
+ auto *bomb=TheCSBots()->GetLooseBomb();if(!bomb)return;
+ static float nextCheck=0;
+ if(gpGlobals->time<nextCheck && nextCheck-gpGlobals->time<=1)return;
+ nextCheck=gpGlobals->time+1;
+ auto *goal=TheNavAreaGrid.GetNearestNavArea(&bomb->pev->origin);if(!goal)return;
+ CCSBot *best=nullptr;float bestTravel=1e30f;
+ for(int i=1;i<=gpGlobals->maxClients;++i) {
+  auto *p=Player(i);if(!p || !p->IsBot() || !p->IsAlive() || p->m_iTeam!=TERRORIST)continue;
+  auto *bot=static_cast<CCSBot *>(p);
+  if(SimulatedAway(bot) || bot->IsBuying() || bot->IsCarryingBomb() || bot->IsBlind()
+   || bot->IsAttacking() || bot->IsEnemyVisible() || bot->GetTimeSinceAttacked()<2
+   || IsManagingGrenade(bot) || HasHumanOrder(bot) || !bot->GetLastKnownArea())continue;
+  // Do not restart a working fetch each tick or swap runners as distances change.
+  if(bot->IsFetchingBomb() && bot->HasPath())return;
+  ShortestPathCost cost;
+  float travel=NavAreaTravelDistance(bot->GetLastKnownArea(),goal,cost);
+  if(travel>=0 && travel<bestTravel){best=bot;bestTravel=travel;}
+ }
+ if(best && !best->IsFetchingBomb()) {
+  best->StopFollowing();best->Run();best->SetDisposition(CCSBot::ENGAGE_AND_INVESTIGATE);
+  best->FetchBomb();
+ }
+}
+
+struct SiteRotation {
+ int id=0,target=0;unsigned round=0;
+ float until=0,nextCheck=0;
+ CompetitiveSiteCamp camp;
+};
+SiteRotation siteRotations[MAX_CLIENTS+1];
+void MaintainSiteCamping() {
+ for(int i=1;i<=gpGlobals->maxClients;++i) {
+  auto *p=Player(i);if(!p || !p->IsBot())continue;
+  auto *bot=static_cast<CCSBot *>(p);auto &s=siteRotations[i];
+  int id=GETPLAYERUSERID(p->edict());
+  if(s.id!=id || s.round!=roundSerial){s=SiteRotation {};s.id=id;s.round=roundSerial;}
+  if(gpGlobals->time<s.nextCheck && s.nextCheck-gpGlobals->time<=1)continue;
+  s.nextCheck=gpGlobals->time+1;
+  bool eligible=bot->IsAlive() && RoundTacticsAllowed() && !Completed()
+   && !CSGameRules()->IsFreezePeriod() && CSGameRules()->m_iRoundWinStatus==WINSTATUS_NONE
+   && TheCSBots()->GetScenario()==CCSBotManager::SCENARIO_DEFUSE_BOMB
+   && !TheCSBots()->IsBombPlanted() && !bot->IsCarryingBomb() && !bot->IsFetchingBomb()
+   && !bot->IsDefusingBomb() && !bot->IsEscapingFromBomb() && !bot->IsBuying()
+   && !bot->m_bIsVIP && !HasHumanOrder(bot) && !IsManagingGrenade(bot)
+   && !SimulatedAway(bot) && bot->GetTask()!=CCSBot::PLANT_BOMB;
+  // Enemy contact permits holding the site, including a short gap between sightings.
+  bool enemy=bot->IsEnemyVisible() || bot->IsAttacking() || bot->GetTimeSinceAttacked()<3;
+  auto *a=eligible?Destination(TeamOrder::GoA,bot->pev->origin):nullptr;
+  auto *b=eligible?Destination(TeamOrder::GoB,bot->pev->origin):nullptr;
+  int site=a && (*a->GetCenter()-bot->pev->origin).LengthSquared()<400*400?1:
+   b && (*b->GetCenter()-bot->pev->origin).LengthSquared()<400*400?2:0;
+  int target=s.camp.Update(gpGlobals->time,site,eligible,enemy);
+  if(!eligible || enemy){s.target=0;continue;}
+  if(s.target && (site==s.target || gpGlobals->time>=s.until))s.target=0;
+  if(s.target)continue;
+  if(!target || !bot->GetLastKnownArea())continue;
+  auto *goal=target==1?a:b;if(!goal)continue;
+  ShortestPathCost cost;
+  if(NavAreaTravelDistance(bot->GetLastKnownArea(),goal,cost)<0)continue;
+  bot->StopFollowing();bot->Run();bot->SetTask(CCSBot::SEEK_AND_DESTROY);
+  bot->MoveTo(goal->GetCenter(),FASTEST_ROUTE);
+  s.camp.Rotated(gpGlobals->time);s.target=target;s.until=gpGlobals->time+45;
+  // Update the captain route too, otherwise it sends the bot straight back to A.
+  auto &plan=plans[bot->m_iTeam];
+  if(plan.ids[i]==id){plan.roles[i]=target==1?TeamOrder::GoA:TeamOrder::GoB;plan.applied[i]=plan.revision;}
+ }
+}
+
 void MaintainCaptains() {
  if(!RoundTacticsAllowed()){ResetCaptains();return;}
  if(!captainMode.value || Completed() || CSGameRules()->m_iRoundWinStatus!=WINSTATUS_NONE
@@ -574,6 +650,7 @@ void MaintainCaptains() {
   for(int i=1;i<=gpGlobals->maxClients;++i) {
    auto *p=Player(i);if(!p || !p->IsBot() || p->m_iTeam!=team || GETPLAYERUSERID(p->edict())!=plan.ids[i]) continue;
    auto *bot=static_cast<CCSBot *>(p);
+   if(bot->IsFetchingBomb() || IsRotatingSites(bot))continue;
    if(bot->IsCarryingBomb() && (!plan.staged || bot->IsAtBombsite())) {
     if(!bot->IsAlive() || bot->IsAttacking() || bot->IsEnemyVisible() || bot->GetTimeSinceAttacked()<2
        || bot->IsBuying() || IsManagingGrenade(bot))continue;
@@ -635,6 +712,11 @@ bool Word(const char *text, const char *word)
 		if ((p == text || p[-1] == ' ') && (p[length] == 0 || p[length] == ' ')) return true;
 	return false;
 }
+}
+
+bool IsRotatingSites(CCSBot *bot) {
+ const auto &s=siteRotations[bot->entindex()];
+ return s.id==GETPLAYERUSERID(bot->edict()) && s.round==roundSerial && s.target!=0 && gpGlobals->time<s.until;
 }
 
 bool CaptainPlanIndependent(CCSBot *bot) {
@@ -1024,6 +1106,34 @@ bool NextStrafe(CCSBot *bot, CoverPeek &peek, bool reverse=false)
 }
 
 }
+bool ApproachWithPistol(CCSBot *bot)
+{
+ if(!Enabled() || !combatMovement.value || !bot || !bot->IsAlive() || Completed()
+  || !bot->IsUsingPistol() || bot->IsBlind() || bot->IsReloading()
+  || bot->IsOnLadder() || !(bot->pev->flags&FL_ONGROUND) || bot->pev->waterlevel>1
+  || bot->IsDefusingBomb() || bot->IsEscapingFromBomb() || bot->m_bIsVIP
+  || bot->HasShield() || bot->GetTask()==CCSBot::PLANT_BOMB
+  || bot->GetTask()==CCSBot::HOLD_POSITION || bot->GetTask()==CCSBot::SNIPING
+  || IsManagingGrenade(bot) || HasHumanOrder(bot)) return false;
+ auto *enemy=bot->GetEnemy();
+ if(!enemy || !enemy->IsAlive() || !TargetAllowed(enemy)
+  || !bot->IsEnemyVisible() || !bot->IsVisible(enemy,true)) return false;
+ Vector toward=enemy->pev->origin-bot->pev->origin; toward.z=0;
+ // Close to a useful pistol distance, rather than charging into point-blank range.
+ if(toward.Length2D()<=400) return false;
+ toward.NormalizeInPlace();
+ Vector origin=bot->pev->origin;
+ if(bot->IsCrouching()) origin.z+=18;
+ const float step=std::max(48.0f,bot->pev->maxspeed*(g_flBotFullThinkInterval+.1f));
+ // Check the standing corridor and its floor before abandoning a crouched hold.
+ if(!PeekRoute(bot,origin,origin+toward*step)) return false;
+ bot->StandUp();
+ bot->Run();
+ bot->ClearMovement();
+ // Also validates the actual, view-relative movement keys before issuing them.
+ return PeekMove(bot,bot->pev->origin+toward*step);
+}
+
 bool UpdateCoverPeek(CCSBot *bot)
 {
  using CompetitiveBotPolicy::PeekPhase;
@@ -1286,6 +1396,8 @@ void Frame()
 		for (auto &state : slots) { state.reply.active = false; state.nextChat = 0; }
 		if (roundChat.value) { TeamLine(TERRORIST, "gg"); TeamLine(CT, "gg"); }
 	}
+	MaintainBombRecovery();
+	MaintainSiteCamping();
 	MaintainCaptains();
 	if (change.greet) {
 		if (roundChat.value) { TeamLine(TERRORIST, "glhf"); TeamLine(CT, "glhf"); }
@@ -1297,7 +1409,7 @@ void Frame()
 		auto *bot = static_cast<CCSBot *>(p);
   if (SimulatedAway(bot)) { State(bot).reply.active = false; continue; }
   auto &watch=watches[i];
-  if(watch.id==GETPLAYERUSERID(bot->edict()) && watch.expires>gpGlobals->time && bot->IsAlive() && !bot->IsEnemyVisible() && (watch.goal-bot->pev->origin).LengthSquared()<150*150) {
+  if(!bot->IsFetchingBomb() && !IsRotatingSites(bot) && watch.id==GETPLAYERUSERID(bot->edict()) && watch.expires>gpGlobals->time && bot->IsAlive() && !bot->IsEnemyVisible() && (watch.goal-bot->pev->origin).LengthSquared()<150*150) {
    bot->TryToHide(bot->GetLastKnownArea(),watch.expires-gpGlobals->time,150,true,true);watch.expires=0;
   }
   UpdateTactics(bot);

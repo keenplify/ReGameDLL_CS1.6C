@@ -361,6 +361,7 @@ public:
 	void PlantBomb();
 
 	void FetchBomb();									// bomb has been dropped - go get it
+	bool IsFetchingBomb() const { return m_state == &m_fetchBombState; }
 	bool NoticeLooseBomb() const;						// return true if we noticed the bomb on the ground or on radar
 	bool CanSeeLooseBomb() const;						// return true if we directly see the loose bomb
 	bool IsCarryingBomb() const;
