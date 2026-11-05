@@ -340,6 +340,11 @@ void BotProfileManager::Init(const char *filename, unsigned int *checksum)
 			{
 				profile->m_aggression = Q_atof(token) / 100.0f;
 			}
+			else if (!Q_stricmp("CompetitiveDifficulty", attributeName))
+			{
+				const int difficulty = Q_atoi(token);
+				profile->m_competitiveDifficulty = difficulty >= 0 && difficulty <= 4 ? difficulty : -1;
+			}
 			else if (!Q_stricmp("CompetitiveMMR", attributeName))
 			{
 				profile->m_competitiveMmr = Q_atoi(token);

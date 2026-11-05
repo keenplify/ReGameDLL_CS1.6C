@@ -38,6 +38,8 @@ float nextProgressCheck=0,matchProgress=0;
 CBasePlayer *Player(int i) {auto *p=i>0 && i<=gpGlobals->maxClients?UTIL_PlayerByIndex(i):nullptr;return p && p->IsPlayer() && !p->IsDormant()?static_cast<CBasePlayer *>(p):nullptr;}
 State &Get(CCSBot *b) {auto &s=states[b->entindex()];int id=GETPLAYERUSERID(b->edict());if(s.id!=id){s=State {};s.id=id;}return s;}
 int Level(CCSBot *b) {
+ const int managed=b->GetProfile()->GetCompetitiveDifficulty();
+ if(managed>=0 && managed<=4)return managed;
  const int fallback=level.value>=0?int(level.value):int(cv_bot_difficulty.value)*4/3;
  return CompetitiveCasual::Enabled(CVAR_GET_FLOAT("competitive_game_mode"))
   ? CompetitiveCasual::SkillLevel(b->GetProfile()->GetCompetitiveMmr(),fallback) : fallback;
