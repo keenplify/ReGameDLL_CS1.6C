@@ -364,6 +364,14 @@ void AttackState::OnUpdate(CCSBot *me)
 		return;
 	}
 
+	// Short checked running bursts keep normal weapon firing and accuracy.
+	if (CompetitiveBots::RunAndGun(me))
+	{
+		m_crouchAndHold = false;
+		if (gpGlobals->time > m_reacquireTimestamp) me->FireWeaponAtEnemy();
+		return;
+	}
+
 	// A cover cycle owns movement while briefly breaking line of sight.
 	if (CompetitiveBots::UpdateCoverPeek(me))
 		return;

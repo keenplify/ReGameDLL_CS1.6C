@@ -28,6 +28,7 @@
 
 #include "precompiled.h"
 #include "bot/cs_bot_competitive.h"
+#include "bot/nav_generate.h"
 
 const float updateTimesliceDuration = 0.5f;
 
@@ -51,24 +52,48 @@ bool LearningHullClear(const Vector &from,const Vector &to,edict_t *bot) {
  }
  return false;
 }
-bool LearningPlayerRoute(const Vector &from,const Vector &to,edict_t *bot) {
- const Vector halfHull(0,0,18.1f);
- Vector start=from+halfHull,end=to+halfHull;
- // The sampled floor is a point; nearby stair treads can be up to StepHeight
- // higher under the player's footprint. Permit that normal step clearance.
- if(!LearningHullClear(start,start,bot))start.z+=StepHeight;
- if(!LearningHullClear(end,end,bot))end.z+=StepHeight;
- if(!LearningHullClear(start,start,bot) || !LearningHullClear(end,end,bot))return false;
- if(LearningHullClear(start,end,bot))return true;
- // Check all three legs of a step/jump, including ceiling and landing clearance.
- for(float lift:{StepHeight,JumpCrouchHeight}) {
-  float height=Q_max(start.z,end.z)+lift;
-  Vector up(start.x,start.y,height),across(end.x,end.y,height);
-  if(LearningHullClear(start,up,bot) && LearningHullClear(up,across,bot)
-     && LearningHullClear(across,end,bot))return true;
+struct LearningHazard { Vector lo, hi; bool liquid; };
+std::vector<LearningHazard> learningHazards;
+void CaptureLearningHazards() {
+ learningHazards.clear();
+ // Sampling teleports the learner. Do not let incidental button/trigger touches
+ // change the geometry being analyzed halfway through generation.
+ for (const char *classname : {"trigger_hurt", "func_water"}) {
+  CBaseEntity *entity = nullptr;
+  while ((entity = UTIL_FindEntityByClassname(entity, classname)) != nullptr) {
+   auto *v = entity->pev;
+   if (FClassnameIs(v, "trigger_hurt")) {
+    if (v->dmg <= 0 || v->solid != SOLID_TRIGGER || (v->spawnflags & SF_TRIGGER_HURT_NO_CLIENTS))continue;
+   }
+   else if (v->skin != CONTENTS_SLIME && v->skin != CONTENTS_LAVA)continue;
+   // Engine abs bounds include broad-phase padding. A dry walkway just above
+   // a liquid surface must not be rejected as if that padding were liquid.
+   const bool liquid=FClassnameIs(v,"func_water");
+   const Vector lo=liquid ? v->origin+v->mins : v->absmin;
+   const Vector hi=liquid ? v->origin+v->maxs : v->absmax;
+   learningHazards.push_back({lo,hi,liquid});
+   CONSOLE_ECHO("  NAV hazard %s: %.1f %.1f %.1f -> %.1f %.1f %.1f\n", classname,
+    lo.x,lo.y,lo.z,hi.x,hi.y,hi.z);
+  }
  }
- return false;
 }
+bool LearningSegmentSafe(const Vector &from, const Vector &to) {
+ // Traces do not collide with trigger_hurt. Include the full player envelope.
+ for (const auto &hazard : learningHazards)
+  if (NavGeneration::TouchesVolume(from,to,hazard.lo,hazard.hi,hazard.liquid))return false;
+ return true;
+}
+
+}
+
+// Shared by node sampling and generated drop links. Inputs are floor positions.
+bool IsGeneratedPlayerRouteTraversable(const Vector &from, const Vector &to, edict_t *bot, bool drop) {
+ auto clear = [bot](const Vector &a, const Vector &b) {
+  // The trace uses the crouched hull. Hazard checks use a standing envelope.
+  return LearningSegmentSafe(a - Vector(0,0,18.1f), b - Vector(0,0,18.1f))
+   && LearningHullClear(a,b,bot);
+ };
+ return NavGeneration::PlayerRoute(from,to,StepHeight,JumpCrouchHeight,drop,clear,LearningSegmentSafe);
 }
 
 inline CNavNode *LadderEndSearch(CBaseEntity *pEntity, const Vector *pos, NavDirType mountDir)
@@ -108,7 +133,8 @@ inline CNavNode *LadderEndSearch(CBaseEntity *pEntity, const Vector *pos, NavDir
 			continue;
 
 		// if no node exists here, create one and continue the search
-		if (!CNavNode::GetNode(&tryPos))
+		if (IsGeneratedPlayerRouteTraversable(tryPos,tryPos,ENT(pEntity->pev))
+			&& !CNavNode::GetNode(&tryPos))
 		{
 			return new CNavNode(&tryPos, &tryNormal, nullptr);
 		}
@@ -207,6 +233,7 @@ void hideProgressMeter()
 
 void CCSBot::StartLearnProcess()
 {
+	CaptureLearningHazards();
 	startProgressMeter("#CZero_LearningMap");
 	drawProgressMeter(0, "#CZero_LearningMap");
 	BuildLadders();
@@ -224,6 +251,15 @@ void CCSBot::StartLearnProcess()
 		return;
 	}
 
+	if (!IsGeneratedPlayerRouteTraversable(pos,pos,edict()))
+	{
+		CONSOLE_ECHO("ERROR: Navigation seed intersects a hazard or player obstruction\n");
+		hideProgressMeter();
+		m_processMode = PROCESS_NORMAL;
+		TheCSBots()->AnalysisCompleted();
+		CompetitiveBots::ResetNavigationLearning();
+		return;
+	}
 	m_currentNode = new CNavNode(&pos, &normal);
 	m_goalPosition = pev->origin;
 	m_processMode = PROCESS_LEARN;
@@ -392,7 +428,7 @@ bool CCSBot::LearnStep()
 					walkable = false;
 				}
 #endif
-				if (walkable && !LearningPlayerRoute(from,to,edict()))walkable=false;
+				if (walkable && !IsGeneratedPlayerRouteTraversable(from,to,edict()))walkable=false;
 				if (walkable)
 				{
 					// we can move here

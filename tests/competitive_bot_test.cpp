@@ -24,6 +24,30 @@ int main()
 {
 	int failures = 0;
 #define CHECK(value) do { if (!(value)) { std::fprintf(stderr, "line %d: %s\n", __LINE__, #value); ++failures; } } while (0)
+ CHECK(CompetitiveBotPolicy::EconomyAllowed(false,0));
+ CHECK(CompetitiveBotPolicy::EconomyAllowed(false,3));
+ CHECK(!CompetitiveBotPolicy::EconomyAllowed(true,0));
+ CHECK(!CompetitiveBotPolicy::EconomyAllowed(false,1));
+ CHECK(!CompetitiveBotPolicy::EconomyAllowed(false,2));
+ CHECK(CompetitiveBotPolicy::ModeExecutionDifficulty(0,1,false)==1);
+ CHECK(CompetitiveBotPolicy::ModeExecutionDifficulty(3,2,false)==4);
+ CHECK(CompetitiveBotPolicy::ModeExecutionDifficulty(4,2,false)==4);
+ CHECK(CompetitiveBotPolicy::ModeExecutionDifficulty(1,2,true)==1);
+ CHECK(CompetitiveBotPolicy::ModeExecutionDifficulty(0,0,false)==0);
+ CHECK(CompetitiveBotPolicy::RoundTacticsAllowed(false,false,true,true)); // Arena tactics remain available.
+ CHECK(CompetitiveBotPolicy::RunGunChance(true,false,false,false,400)>CompetitiveBotPolicy::RunGunChance(false,false,true,false,400));
+ CHECK(CompetitiveBotPolicy::RunGunChance(true,false,false,false,1000)==0);
+ CHECK(CompetitiveBotPolicy::RunGunChance(false,false,false,false,400)==0);
+ CompetitiveBotPolicy::RunGunWindow mobile;
+ mobile.Decide(10,85,20,1);CHECK(mobile.Active(10.5f));CHECK(!mobile.Active(12));
+ mobile.Decide(12,100,0,1);CHECK(!mobile.Active(12)); // No reroll each frame.
+ CompetitiveBotPolicy::RunGunWindow stationary;
+ stationary.Decide(10,20,50,1);CHECK(!stationary.Active(10));
+ CHECK(CompetitiveBotPolicy::ArenaPickupAllowed(2,false,false,false,false,true,false));
+ CHECK(!CompetitiveBotPolicy::ArenaPickupAllowed(2,true,false,false,false,true,false));
+ CHECK(!CompetitiveBotPolicy::ArenaPickupAllowed(2,false,true,false,false,true,false));
+ CHECK(!CompetitiveBotPolicy::ArenaPickupAllowed(2,false,false,false,true,true,false));
+ CHECK(!CompetitiveBotPolicy::ArenaPickupAllowed(0,false,false,false,false,true,false));
  {
   CompetitiveSiteCamp camp;
   CHECK(camp.Update(0,1,true,false)==0);

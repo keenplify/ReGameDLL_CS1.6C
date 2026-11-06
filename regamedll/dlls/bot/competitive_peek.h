@@ -2,6 +2,21 @@
 #pragma once
 
 namespace CompetitiveBotPolicy {
+inline int RunGunChance(bool smg,bool shotgun,bool rifle,bool pistol,float range) {
+ if(range<80)return 0;
+ return smg && range<=900?85:shotgun && range<=450?45:rifle && range<=600?20:pistol && range<=550?30:0;
+}
+struct RunGunWindow {
+ bool decided=false;
+ float until=0;
+ int side=1;
+ void Decide(float now,int chance,int roll,int direction) {
+  if(decided)return;
+  decided=true;side=direction<0?-1:1;
+  until=roll<chance?now+1.8f:now;
+ }
+ bool Active(float now) const {return decided && now>=until-1.8f && now<until;}
+};
 enum class PeekPhase { Idle, Retreat, Hidden, Expose, Fire };
 struct PeekCycle {
  PeekPhase phase = PeekPhase::Idle;

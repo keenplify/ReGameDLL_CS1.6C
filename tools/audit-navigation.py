@@ -3,7 +3,7 @@
 from pathlib import Path
 import struct,re,json,math,argparse
 
-def nav(path):
+def nav(path,allow_trailing=False):
  b=path.read_bytes();p=0
  def r(fmt):
   nonlocal p
@@ -20,7 +20,7 @@ def nav(path):
   skip(r('B')*17);skip(r('B')*14)
   for z in range(r('I')):r('IBIB');skip(r('B')*5)
   r('H');areas[id]=(e,adj,ne,sw)
- assert p==len(b)
+ assert p==len(b) or (allow_trailing and p<len(b))
  return areas,size
 
 def nearest(areas,pos):

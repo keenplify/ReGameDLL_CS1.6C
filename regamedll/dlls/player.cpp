@@ -406,6 +406,7 @@ LINK_HOOK_CLASS_VOID_CHAIN(CBasePlayer, Radio, (const char *msg_id, const char *
 
 void EXT_FUNC CBasePlayer::__API_HOOK(Radio)(const char *msg_id, const char *msg_verbose, short pitch, bool showIcon)
 {
+	if (CompetitiveBots::IsSilentSubstitute(this)) return;
 	// Spectators don't say radio messages.
 	if (!IsPlayer())
 		return;

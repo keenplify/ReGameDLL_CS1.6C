@@ -1018,31 +1018,9 @@ inline bool testJumpDown(const Vector *fromPos, const Vector *toPos)
 	if (dz <= JumpCrouchHeight || dz >= DeathDrop)
 		return false;
 
-	//
-	// Check LOS out and down
-	//
-	// ------+
-	//       |
-	// F     |
-	//       |
-	//       T
-	//
-
-	Vector from(fromPos->x, fromPos->y, fromPos->z + HumanHeight);
-	Vector to(toPos->x, toPos->y, from.z);
-
-	TraceResult result;
-	UTIL_TraceLine(from, to, ignore_monsters, nullptr, &result);
-	if (result.flFraction != 1.0f || result.fStartSolid)
-		return false;
-
-	from = to;
-	to.z = toPos->z + 2.0f;
-	UTIL_TraceLine(from, to, ignore_monsters, nullptr, &result);
-	if (result.flFraction != 1.0f || result.fStartSolid)
-		return false;
-
-	return true;
+	// Eye-height LOS can pass over a solid railing. Require the player's hull
+	// to leave the ledge and land safely; never invent a jump over the fence.
+	return IsGeneratedPlayerRouteTraversable(*fromPos, *toPos, nullptr, true);
 }
 
 inline CNavArea *findJumpDownArea(const Vector *fromPos, NavDirType dir)
@@ -1051,7 +1029,7 @@ inline CNavArea *findJumpDownArea(const Vector *fromPos, NavDirType dir)
 	AddDirectionVector(&start, dir, GenerationStepSize / 2.0f);
 
 	Vector toPos;
-	CNavArea *downArea = FindFirstAreaInDirection(&start, dir, 4.0f * GenerationStepSize, DeathDrop, nullptr, &toPos);
+	CNavArea *downArea = FindFirstAreaInDirection(&start, dir, 100.0f, DeathDrop, nullptr, &toPos);
 
 	if (downArea && testJumpDown(fromPos, &toPos))
 		return downArea;

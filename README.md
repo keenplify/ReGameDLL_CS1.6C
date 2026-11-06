@@ -260,3 +260,23 @@ Validation: native Linux build and policy tests cover state transitions,
 recovery gates, participation limits, buying-role proportions, memory expiry,
 and idle recovery. Actual corner geometry, shot cadence, and match behavior
 still need in-game validation; Windows runtime behavior is not yet verified.
+
+Arena bot communication keeps tactical calls but disables round-economy plans,
+buy/eco/force/save orders, and cached eco buying. The gate uses server-owned
+`competitive_game_mode` (FFA = 1, Arena = 2); ordinary competitive modes retain
+their economy behavior. Policy tests cover that distinction.
+
+Managed FFA/Arena bots can choose one 1.8-second running attack burst per
+engagement: 85% for eligible SMG duels, 45% for shotguns, 30% for pistols, and
+20% for close rifle duels. Snipers are excluded. Both the intended and actual
+movement corridors require clear hull traces and supported ground. Targets
+must remain visible; objectives, explicit human orders, reloads and ladders
+retain priority. Firing uses the existing engine path with stock movement
+accuracy/recoil, not an accuracy exemption.
+
+In Arena, unarmed bots scan nearby visible primary pickups before roaming,
+using bounded candidate/path attempts and expiring targets. They stop seeking
+once they obtain a primary; unavailable/unreachable pickups expire, and combat
+or explicit human orders can interrupt. The disposable backend runtime fixture
+`test-arena-pickups-runtime.ts` disables ordinary roaming to isolate pickup
+priority from accidentally walking over a gun.

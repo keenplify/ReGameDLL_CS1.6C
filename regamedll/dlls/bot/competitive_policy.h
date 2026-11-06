@@ -2,6 +2,18 @@
 #pragma once
 
 namespace CompetitiveBotPolicy {
+inline int ModeExecutionDifficulty(int level,float mode,bool preboosted) {
+ if((mode==1 || mode==2) && !preboosted && level<4)++level;
+ return level<0?0:level>4?4:level;
+}
+inline bool ArenaPickupAllowed(float mode,bool primary,bool enemy,bool objective,bool order,bool alive,bool freeze) {
+ return mode==2 && !primary && !enemy && !objective && !order && alive && !freeze;
+}
+inline bool EconomyAllowed(bool ffa, float gameMode) {
+ // Managed FFA (1) and Arena (2) supply free weapons; keep their tactical
+ // communication but never plan a buy, eco or weapon-saving round.
+ return !ffa && gameMode != 1 && gameMode != 2;
+}
 inline bool RoundTacticsAllowed(bool ffa, bool deathmatch, bool managed, bool live) {
  return !ffa && !deathmatch && (!managed || live);
 }

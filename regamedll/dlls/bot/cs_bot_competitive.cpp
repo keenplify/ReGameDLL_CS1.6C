@@ -24,6 +24,12 @@
 #endif
 
 namespace CompetitiveBots {
+bool IsSilentSubstitute(CBasePlayer *player) {
+ // YaPB uses ordinary CBasePlayer objects with FL_FAKECLIENT, whereas native
+ // bots override IsBot(). Accept either without casting a YaPB player to CCSBot.
+ if (!player || (!player->IsBot() && !(player->pev->flags & FL_FAKECLIENT))) return false;
+ return !Q_strcmp(g_engfuncs.pfnInfoKeyValue(GET_INFO_BUFFER(player->edict()), "_16c_sub"), "1");
+}
 namespace {
 cvar_t enabled = { "bot_competitive", "0", FCVAR_SERVER, 0.0f, nullptr };
 cvar_t teamOrders = { "bot_team_orders", "1", FCVAR_SERVER, 0.0f, nullptr };
@@ -69,6 +75,7 @@ struct Slot {
 };
 Slot slots[MAX_CLIENTS + 1];
 bool mobilityDecided[MAX_CLIENTS+1]={}, mobilityPreferred[MAX_CLIENTS+1]={};
+CompetitiveBotPolicy::RunGunWindow runGunWindows[MAX_CLIENTS+1];
 struct CoverPeek {
  CompetitiveBotPolicy::PeekCycle cycle;
  CompetitiveBotPolicy::PeekProgress progress;
@@ -151,10 +158,11 @@ void RefreshLatency() {
   if (!p->IsBot()) continue;
   // Keep FL_FAKECLIENT and authoritative identity. Only change the scoreboard hint.
   char *info = GET_INFO_BUFFER(p->edict());
-  const char *wanted = active ? "" : "1";
+  const bool substitute = !Q_strcmp(g_engfuncs.pfnInfoKeyValue(info, "_16c_sub"), "1");
+  const char *wanted = active && !substitute ? "" : "1";
   if (Q_strcmp(g_engfuncs.pfnInfoKeyValue(info, "*bot"), wanted))
    SET_CLIENT_KEY_VALUE(i, info, "*bot", wanted);
-  if (!active) { state.ping = 0; continue; }
+  if (!active || substitute) { state.ping = 0; continue; }
   if(!state.categoryBase){int roll=RANDOM_LONG(0,99);state.category=roll<int(highPing.value)?1:roll<int(highPing.value+mediumPing.value)?2:0;state.categoryBase=state.category==1?RANDOM_LONG(120,220):state.category==2?RANDOM_LONG(60,90):1;state.temperament=pingTemperament(static_cast<CCSBot *>(p)->GetProfile()->GetAggression()>.7f?1:static_cast<CCSBot *>(p)->GetProfile()->GetAggression()<.35f?2:0,RANDOM_LONG(0,99));}
   if (state.base < low || state.base > high) state.base = RANDOM_LONG(low, high);
   state.ping = state.base + RANDOM_LONG(-2, 2);
@@ -191,7 +199,7 @@ bool CanHear(CBasePlayer *bot, CBasePlayer *human, bool teamOnly)
 
 bool Queue(CCSBot *bot, CBasePlayer *human, bool teamOnly, const char *line, bool tactical = false)
 {
-	if (!textChat.value || !CombatTeam(bot) || SimulatedAway(bot) || (teamOnly && Ffa())) return false;
+	if (IsSilentSubstitute(bot) || !textChat.value || !CombatTeam(bot) || SimulatedAway(bot) || (teamOnly && Ffa())) return false;
 	auto &state = State(bot);
 	if (state.reply.active || gpGlobals->time < state.nextChat) return false;
 	if (human && !CanHear(bot, human, teamOnly)) return false;
@@ -732,6 +740,7 @@ bool RoundTacticsAllowed() {
 }
 
 bool InitiatesChat(CCSBot *bot) {
+ if(IsSilentSubstitute(bot))return false;
  char *info=GET_INFO_BUFFER(bot->edict());const char *style=g_engfuncs.pfnInfoKeyValue(info,"_16c_style");
  if(style && !Q_strcmp(style,"quiet"))return false;
  if(Ffa())return true;
@@ -859,7 +868,7 @@ bool PlayerPingsEnabled() {
   && Flag("competitive_player_ping") && Flag("competitive_bot_reports");
 }
 void ReportEnemyPing(CCSBot *bot) {
- if (!Enabled() || pingComms.value<=0 || !CombatTeam(bot)) return;
+ if (IsSilentSubstitute(bot) || !Enabled() || pingComms.value<=0 || !CombatTeam(bot)) return;
  auto &state = State(bot);
  if (gpGlobals->time < state.nextPing || gpGlobals->time < nextTeamPing[bot->m_iTeam]) return;
  auto *enemy = bot->GetEnemy();
@@ -982,6 +991,7 @@ bool MobileCombatWeapon(CCSBot *bot)
 
 void BeginCombatMovement(CCSBot *bot)
 {
+ runGunWindows[bot->entindex()]=CompetitiveBotPolicy::RunGunWindow {};
  mobilityDecided[bot->entindex()]=mobilityPreferred[bot->entindex()]=false;
  coverPeeks[bot->entindex()]=CoverPeek {};
 }
@@ -1106,6 +1116,45 @@ bool NextStrafe(CCSBot *bot, CoverPeek &peek, bool reverse=false)
 }
 
 }
+bool RunAndGun(CCSBot *bot)
+{
+ const float mode=CVAR_GET_FLOAT("competitive_game_mode");
+ if(!Enabled() || !combatMovement.value || (mode!=1 && mode!=2) || !bot || !bot->IsAlive() || Completed()
+  || CSGameRules()->IsFreezePeriod() || bot->IsBlind() || bot->IsReloading() || bot->IsOnLadder()
+  || !(bot->pev->flags&FL_ONGROUND) || bot->pev->waterlevel>1 || bot->HasShield()
+  || bot->IsDefusingBomb() || bot->IsEscapingFromBomb() || bot->m_bIsVIP
+  || bot->GetTask()==CCSBot::PLANT_BOMB || bot->GetTask()==CCSBot::HOLD_POSITION
+  || bot->GetTask()==CCSBot::SNIPING || IsManagingGrenade(bot) || HasHumanOrder(bot))return false;
+ auto *enemy=bot->GetEnemy();auto *weapon=bot->GetActiveWeapon();
+ if(!enemy || !enemy->IsAlive() || !weapon || !TargetAllowed(enemy)
+  || !bot->IsEnemyVisible() || !bot->IsVisible(enemy,true))return false;
+ const int id=weapon->m_iId;
+ const bool smg=id==WEAPON_MP5N || id==WEAPON_TMP || id==WEAPON_P90 || id==WEAPON_MAC10 || id==WEAPON_UMP45;
+ const bool shotgun=id==WEAPON_M3 || id==WEAPON_XM1014;
+ const bool rifle=id==WEAPON_AK47 || id==WEAPON_M4A1 || id==WEAPON_FAMAS || id==WEAPON_GALIL || id==WEAPON_AUG || id==WEAPON_SG552;
+ Vector toward=enemy->pev->origin-bot->pev->origin;toward.z=0;
+ const float range=toward.NormalizeInPlace();
+ const int chance=CompetitiveBotPolicy::RunGunChance(smg,shotgun,rifle,bot->IsUsingPistol(),range);
+ if(!chance)return false;
+ auto &window=runGunWindows[bot->entindex()];
+ if(!window.decided)window.Decide(gpGlobals->time,chance,RANDOM_LONG(0,99),RANDOM_LONG(0,1)?1:-1);
+ if(!window.Active(gpGlobals->time))return false;
+ const Vector side(-toward.y,toward.x,0);
+ const float close=shotgun?120.0f:smg?180.0f:260.0f;
+ Vector origin=bot->pev->origin;if(bot->IsCrouching())origin.z+=18;
+ const float step=std::max(48.0f,bot->pev->maxspeed*(g_flBotFullThinkInterval+.1f));
+ for(int attempt=0;attempt<2;++attempt) {
+  Vector direction=side*float(window.side)+(range>close?toward*1.5f:Vector(0,0,0));
+  direction.NormalizeInPlace();const Vector goal=origin+direction*step;
+  if(PeekRoute(bot,origin,goal)) {
+   bot->StandUp();bot->Run();bot->ClearMovement();
+   if(PeekMove(bot,goal)){coverPeeks[bot->entindex()].cycle.phase=CompetitiveBotPolicy::PeekPhase::Idle;return true;}
+  }
+  window.side=-window.side;
+ }
+ return false;
+}
+
 bool ApproachWithPistol(CCSBot *bot)
 {
  if(!Enabled() || !combatMovement.value || !bot || !bot->IsAlive() || Completed()
@@ -1416,6 +1465,7 @@ void Frame()
 		ReportEnemyPing(bot);
 		if (change.rebuy && bot->IsAlive()) bot->RestartCompetitiveBuying();
 		auto &reply = State(bot).reply;
+		if (IsSilentSubstitute(bot)) { reply.active = false; continue; }
 		if (!reply.active || gpGlobals->time < reply.due) continue;
 		auto *human = Player(reply.listenerSlot);
 		if (!CompetitiveBotPolicy::DeliveryCurrent(gpGlobals->time, reply.issued, reply.deadline,
@@ -1473,6 +1523,8 @@ void Chat(CBasePlayer *speaker, bool teamOnly, const char *text)
 	if (gpGlobals->time < humanState.nextOrder) return;
  TeamOrder order=parseTeamOrder(text);
  if(order==TeamOrder::None)for(int i=0;i<aliasCount;++i)if(!Q_strcmp(phrase,aliases[i].from)){order=parseTeamOrder(aliases[i].to);break;}
+ if(!CompetitiveBotPolicy::EconomyAllowed(Ffa(),CVAR_GET_FLOAT("competitive_game_mode"))
+   && (order==TeamOrder::Eco || order==TeamOrder::Force || order==TeamOrder::FullBuy || order==TeamOrder::HalfBuy || order==TeamOrder::Save))return;
 	if (teamOrders.value && RoundTacticsAllowed() && order != TeamOrder::None
 		&& CompetitiveBotPolicy::ActionsAllowed(Enabled(), Completed(), Ffa(), teamOnly, speaker->IsAlive(), true)) {
 		humanState.nextOrder = gpGlobals->time + 2.0f;

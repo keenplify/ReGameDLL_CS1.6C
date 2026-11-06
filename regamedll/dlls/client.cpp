@@ -963,6 +963,7 @@ LINK_HOOK_VOID_CHAIN(SendSayMessage, (CBasePlayer *pPlayer, const char *pszCmd, 
 
 void EXT_FUNC __API_HOOK(SendSayMessage)(CBasePlayer *pPlayer, const char *pszCmd, BOOL teamonly, const char *pszText, const char *pszFormat, const char *pszConsoleFormat, bool bSenderDead, const char *placeName, bool consoleUsesPlaceName)
 {
+	if (CompetitiveBots::IsSilentSubstitute(pPlayer)) return;
 	char msg[256]; // local mutable copy of pszText
 	char text[128];
 	int j;

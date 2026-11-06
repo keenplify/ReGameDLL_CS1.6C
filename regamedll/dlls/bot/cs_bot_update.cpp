@@ -483,6 +483,8 @@ void CCSBot::Update()
 		m_isEnemyVisible = false;
 	}
 
+	// Free Arena guns take priority over roaming until a primary is acquired.
+	if (CompetitiveBots::ArenaPickupWeapon(this)) return;
 	if (CompetitiveBots::UpdateGrenade(this)) return;
 	if (CompetitiveBots::PauseForTyping(this)) return;
 

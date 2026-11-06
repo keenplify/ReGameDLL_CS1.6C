@@ -8,6 +8,7 @@ class CNavArea;
 
 // State is external to CCSBot/CCSBotManager to preserve the public class layout.
 namespace CompetitiveBots {
+bool IsSilentSubstitute(CBasePlayer *player);
 void RegisterCVars();
 void TryNavigationLearning(CCSBot *bot);
 void ResetNavigationLearning();
@@ -68,6 +69,8 @@ bool RifleBuying();
 int BuyPreference(CCSBot *bot, int index);
 bool PreferMobileCombat(CCSBot *bot);
 bool ApproachWithPistol(CCSBot *bot);
+bool RunAndGun(CCSBot *bot);
+bool ArenaPickupWeapon(CCSBot *bot);
 bool SafeCombatStrafe(CCSBot *bot, bool left);
 void Reset();
 void RoundRestart();

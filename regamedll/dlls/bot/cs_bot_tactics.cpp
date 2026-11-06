@@ -9,11 +9,13 @@
 #include "competitive_spree.h"
 #include "competitive_arena_spread.h"
 #include "competitive_casual.h"
+#include "competitive_policy.h"
 #include <cmath>
 namespace CompetitiveBots {
 namespace {
 cvar_t level={"bot_competitive_difficulty","-1",FCVAR_SERVER,0,nullptr};
 cvar_t tactics={"bot_advanced_tactics","1",FCVAR_SERVER,0,nullptr};
+cvar_t modeDifficultyPreboosted={"bot_mode_difficulty_preboosted","0",FCVAR_SERVER,0,nullptr};
 struct HitMemory {int id=0;EnemyDamageEstimate estimate;};
 struct State {
  int id=0,targetId=0,targetSlot=0,kills=0,milestone=0,lastHealth=100,lastKillerUserid=0;
@@ -26,6 +28,9 @@ struct State {
  float nextLockCheck=0,lastSeen=0,openingSide=1;
  float orderUntil=0,streakDue=0,nextCampDecision=0;
  Vector sampled {0,0,0},avoid {0,0,0};
+ EHANDLE pickup;
+ float nextPickup=0,pickupExpires=0,ignorePickupUntil=0;
+ int ignoredPickup=0;
  HitMemory hits[MAX_CLIENTS+1];
 };
 State states[MAX_CLIENTS+1];
@@ -40,7 +45,8 @@ State &Get(CCSBot *b) {auto &s=states[b->entindex()];int id=GETPLAYERUSERID(b->e
 int Level(CCSBot *b) {
  const int managed=b->GetProfile()->GetCompetitiveDifficulty();
  if(managed>=0 && managed<=4)return managed;
- const int fallback=level.value>=0?int(level.value):int(cv_bot_difficulty.value)*4/3;
+ const int baseline=level.value>=0?int(level.value):int(cv_bot_difficulty.value)*4/3;
+ const int fallback=CompetitiveBotPolicy::ModeExecutionDifficulty(baseline,CVAR_GET_FLOAT("competitive_game_mode"),modeDifficultyPreboosted.value>0);
  return CompetitiveCasual::Enabled(CVAR_GET_FLOAT("competitive_game_mode"))
   ? CompetitiveCasual::SkillLevel(b->GetProfile()->GetCompetitiveMmr(),fallback) : fallback;
 }
@@ -80,12 +86,13 @@ bool Path(CCSBot *b,const Vector &point) {
 int Alive(TeamName team) {int n=0;for(int i=1;i<=gpGlobals->maxClients;++i){auto *p=Player(i);if(p && p->IsAlive() && p->m_iTeam==team)++n;}return n;}
 CCSBot *Captain(TeamName team) {CCSBot *best=nullptr;for(int i=1;i<=gpGlobals->maxClients;++i){auto *p=Player(i);if(p && p->IsBot() && p->IsAlive() && p->m_iTeam==team && (!best || p->pev->frags>best->pev->frags))best=static_cast<CCSBot *>(p);}return best;}
 }
-void RegisterTacticsCVars(){CVAR_REGISTER(&level);CVAR_REGISTER(&tactics);}
+void RegisterTacticsCVars(){CVAR_REGISTER(&level);CVAR_REGISTER(&tactics);CVAR_REGISTER(&modeDifficultyPreboosted);}
 void ResetTactics(bool map) {
  if(map){nextProgressCheck=0;matchProgress=0;}
  for(auto &s:states){if(map)s=State {};else {s.recoilUntil=0;s.kills=0;s.targetId=0;s.hasSample=false;s.nextTick=0;s.streakDue=0;s.orderUntil=0;s.saving=false;s.avoidUntil=0;for(auto &hit:s.hits)hit=HitMemory {};}}
  for(auto &spree:sprees)spree=SpreeState {};
  for(auto &t:teams){t=TeamState {};t.buyAt=gpGlobals->time+3;}
+ for(auto &s:states){s.pickup=nullptr;s.nextPickup=0;s.pickupExpires=0;s.ignoredPickup=0;s.ignorePickupUntil=0;}
  if(map)nextBanter=0;
 }
 void ProtectHumanOrder(CCSBot *b,float seconds){Get(b).orderUntil=gpGlobals->time+seconds;}
@@ -98,6 +105,67 @@ float CasualCampDuration(CCSBot *b) {
  return CompetitiveCasual::CampDuration(gpGlobals->time,Get(b).nextCampDecision,RANDOM_LONG(0,99));
 }
 bool ArenaSpreadEnabled() {return Enabled() && CVAR_GET_FLOAT("competitive_game_mode")==2;}
+namespace {
+bool AvailableArenaGun(CBaseEntity *entity) {
+ if(!entity || entity->pev->effects&EF_NODRAW || entity->pev->solid==SOLID_NOT)return false;
+ if(FClassnameIs(entity->pev,"armoury_entity")) {
+  auto *armoury=static_cast<CArmoury *>(entity);
+  const int item=armoury->m_iItem;
+  return armoury->m_iCount>0 && ((item>=ARMOURY_MP5NAVY && item<=ARMOURY_M249) || (item>=ARMOURY_FAMAS && item<=ARMOURY_UMP45))
+   && TheCSBots()->IsWeaponUseable(armoury->m_iItem);
+ }
+ return FClassnameIs(entity->pev,"weaponbox") && (entity->pev->flags&FL_ONGROUND)
+  && static_cast<CWeaponBox *>(entity)->m_rgpPlayerItems[PRIMARY_WEAPON_SLOT]!=nullptr;
+}
+}
+bool ArenaPickupWeapon(CCSBot *b) {
+ if(!Enabled() || !b)return false;
+ auto &s=Get(b);
+ const bool primary=b->m_rgpPlayerItems[PRIMARY_WEAPON_SLOT]!=nullptr;
+ if(primary && s.pickup){s.pickup=nullptr;b->EquipBestWeapon(MUST_EQUIP);}
+ const bool objective=b->IsDefusingBomb() || b->IsEscapingFromBomb() || b->m_bIsVIP
+  || b->GetTask()==CCSBot::PLANT_BOMB || IsManagingGrenade(b);
+ if(!CompetitiveBotPolicy::ArenaPickupAllowed(CVAR_GET_FLOAT("competitive_game_mode"),primary,
+  b->IsEnemyVisible() || b->IsAttacking(),objective,HasHumanOrder(b),b->IsAlive(),CSGameRules()->IsFreezePeriod())
+  || Completed() || b->IsBlind() || b->IsOnLadder() || !b->GetLastKnownArea()
+  || CSGameRules()->m_iRoundWinStatus!=WINSTATUS_NONE)return false;
+ CBaseEntity *target=s.pickup;
+ if(target && (!AvailableArenaGun(target) || gpGlobals->time>=s.pickupExpires)) {
+  s.ignoredPickup=target->entindex();s.ignorePickupUntil=gpGlobals->time+3;
+  s.pickup=nullptr;target=nullptr;b->DestroyPath();
+ }
+ if(!target) {
+  if(gpGlobals->time<s.nextPickup)return false;
+  s.nextPickup=gpGlobals->time+.5f;
+  CBaseEntity *candidates[8]={};float distances[8]={};int count=0,examined=0;
+  for(const char *name:{"armoury_entity","weaponbox"}) {
+   CBaseEntity *entity=nullptr;
+   while((entity=UTIL_FindEntityByClassname(entity,name))!=nullptr && ++examined<=128) {
+    if(!AvailableArenaGun(entity) || (entity->entindex()==s.ignoredPickup && gpGlobals->time<s.ignorePickupUntil))continue;
+    const float distance=(entity->pev->origin-b->pev->origin).LengthSquared();
+    if(distance>1200*1200)continue;
+    TraceResult trace;UTIL_TraceLine(b->EyePosition(),entity->Center(),ignore_monsters,b->edict(),&trace);
+    if(trace.fStartSolid || trace.fAllSolid || (trace.flFraction<1 && trace.pHit!=entity->edict()))continue;
+    int slot=0;
+    if(count<8)slot=count++;
+    else {for(int i=1;i<8;++i)if(distances[i]>distances[slot])slot=i;if(distance>=distances[slot])continue;}
+    candidates[slot]=entity;distances[slot]=distance;
+   }
+  }
+  for(int attempt=0;attempt<4;++attempt) {
+   int best=-1;for(int i=0;i<count;++i)if(candidates[i] && (best<0 || distances[i]<distances[best]))best=i;
+   if(best<0)break;
+   auto *entity=candidates[best];candidates[best]=nullptr;
+   auto *area=TheNavAreaGrid.GetNearestNavArea(&entity->pev->origin);
+   if(!area || !b->ComputePath(area,&entity->pev->origin,FASTEST_ROUTE))continue;
+   s.pickup=entity;s.pickupExpires=gpGlobals->time+4;target=entity;break;
+  }
+  if(!target)return false;
+ }
+ b->StandUp();b->Run();
+ if(b->UpdatePathMovement(NO_SPEED_CHANGE)==CCSBot::PATH_FAILURE){s.pickupExpires=gpGlobals->time;return false;}
+ return true;
+}
 CNavArea *ArenaHuntArea(CCSBot *b) {
  if(!arenaSpreadAllowed(CVAR_GET_FLOAT("competitive_game_mode"),Enabled(),Busy(b),HasHumanOrder(b))
    || !b->GetLastKnownArea() || b->IsEnemyVisible() || b->IsAttacking())return nullptr;
@@ -175,7 +243,7 @@ bool RecoverRecoil(CCSBot *b) {
  s.recoilUntil=gpGlobals->time+CompetitiveExecution::Get(Level(b)).tracking+.16f;return true;
 }
 bool WaitForTeamBuy(CCSBot *b) {
- if(!Enabled() || !tactics.value || Ffa() || b->m_iTeam<1 || b->m_iTeam>2)return false;
+ if(!Enabled() || !tactics.value || !CompetitiveBotPolicy::EconomyAllowed(Ffa(),CVAR_GET_FLOAT("competitive_game_mode")) || b->m_iTeam<1 || b->m_iTeam>2)return false;
  auto &t=teams[b->m_iTeam];
  if(!t.economy) {
   t.economy=true;int members=0,poor=0;
@@ -186,8 +254,8 @@ bool WaitForTeamBuy(CCSBot *b) {
  }
  return gpGlobals->time<t.buyAt+(b->entindex()%5)*.12f;
 }
-void SetTeamEconomy(TeamName team,bool eco){if(team>=1 && team<=2){teams[team].economy=true;teams[team].eco=eco;teams[team].buyAt=gpGlobals->time;}}
-bool TeamEco(TeamName team){return team>=1 && team<=2 && teams[team].eco;}
+void SetTeamEconomy(TeamName team,bool eco){if(CompetitiveBotPolicy::EconomyAllowed(Ffa(),CVAR_GET_FLOAT("competitive_game_mode")) && team>=1 && team<=2){teams[team].economy=true;teams[team].eco=eco;teams[team].buyAt=gpGlobals->time;}}
+bool TeamEco(TeamName team){return CompetitiveBotPolicy::EconomyAllowed(Ffa(),CVAR_GET_FLOAT("competitive_game_mode")) && team>=1 && team<=2 && teams[team].eco;}
 bool RequestedDrop(CCSBot *b,CBasePlayer *human,const char *requested) {
  if(!b || !human || Busy(b) || !b->CanPlayerBuy(false) || b->m_iAccount<6000 || Saving(b)
   || TheCSBots()->IsBombPlanted() || (human->pev->origin-b->pev->origin).LengthSquared()>300*300)return false;

@@ -28,6 +28,10 @@
 
 #pragma once
 
+// Shared player-hull/hazard checks for sampling and generated drop links.
+bool IsGeneratedPlayerRouteTraversable(const Vector &from, const Vector &to,
+ edict_t *ignore, bool drop = false);
+
 // STL uses exceptions, but we are not compiling with them - ignore warning
 #pragma warning(disable : 4530)
 
@@ -125,7 +129,8 @@ enum NavRelativeDirType
 	NUM_RELATIVE_DIRECTIONS
 };
 
-const double GenerationStepSize = 25.0;  // (30) was 20, but bots can't always fit
+// Fine sampling resolves narrow dry corridors; player hull checks determine fit.
+const double GenerationStepSize = 10.0;
 const float StepHeight          = 18.0f; // if delta Z is greater than this, we have to jump to get up
 const float JumpHeight          = 41.8f; // if delta Z is less than this, we can jump up on it
 const float JumpCrouchHeight    = 58.0f; // (48) if delta Z is less than or equal to this, we can jumpcrouch up on it
