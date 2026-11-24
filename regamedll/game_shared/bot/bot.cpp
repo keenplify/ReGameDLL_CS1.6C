@@ -1,5 +1,7 @@
 #include "precompiled.h"
 #include "bot/cs_bot_competitive.h"
+#include "bot/bhop_race.h"
+#include "bot/bhop_training.h"
 
 // Nasty Hack.  See client.cpp/ClientCommand()
 const char *BotArgs[4] = {};
@@ -276,6 +278,8 @@ void CBot::ExecuteCommand()
 	}
 #endif
 
+	if (BhopTraining::RLMove(this)) { m_flPreviousCommandTime=gpGlobals->time; return; }
+
 	// Run mimic command
 	usercmd_t botCmd;
 	if (!RunMimicCommand(botCmd))
@@ -288,20 +292,26 @@ void CBot::ExecuteCommand()
 		botCmd.viewangles  = pev->v_angle;
 	}
 
-	if (CompetitiveBots::PauseForTyping(static_cast<CCSBot *>(this))) {
-		botCmd.forwardmove = botCmd.sidemove = botCmd.upmove = 0;
-		botCmd.buttons &= ~(IN_FORWARD | IN_BACK | IN_MOVELEFT | IN_MOVERIGHT | IN_JUMP);
-	}
-
-	// player model is "munged"
-	pev->angles = pev->v_angle;
-	pev->angles.x /= -3.0f;
-
-	// save the command time
-	m_flPreviousCommandTime = gpGlobals->time;
-
-	// Run the command
-	PLAYER_RUN_MOVE(edict(), botCmd.viewangles, botCmd.forwardmove, botCmd.sidemove, botCmd.upmove, botCmd.buttons, 0, adjustedMSec);
+	// Only the isolated SGS lab subdivides command time; total simulated msec is unchanged.
+	const int stepLimit=BhopTraining::CommandStepMSec(this);
+	const bool typing=CompetitiveBots::PauseForTyping(static_cast<CCSBot *>(this));
+	int remaining=adjustedMSec;
+	m_flPreviousCommandTime=gpGlobals->time;
+	do {
+		const byte stepMSec=byte(stepLimit?std::min(remaining,stepLimit):remaining);
+		usercmd_t stepCmd=botCmd;
+		BhopRace::GhostPeers ghostPeers(static_cast<CCSBot *>(this));
+		BhopTraining::Command(this,stepCmd,stepMSec*.001f);
+		if (!typing) static_cast<CCSBot *>(this)->ApplyBhopMovement(stepCmd,stepMSec*.001f);
+		BhopRace::Command(static_cast<CCSBot *>(this),stepCmd);
+		if (typing) {
+			stepCmd.forwardmove = stepCmd.sidemove = stepCmd.upmove = 0;
+			stepCmd.buttons &= ~(IN_FORWARD | IN_BACK | IN_MOVELEFT | IN_MOVERIGHT | IN_JUMP);
+		}
+		pev->angles=pev->v_angle;pev->angles.x/=-3.0f;
+		PLAYER_RUN_MOVE(edict(),stepCmd.viewangles,stepCmd.forwardmove,stepCmd.sidemove,stepCmd.upmove,stepCmd.buttons,0,stepMSec);
+		remaining-=stepMSec;
+	} while(remaining>0);
 }
 
 bool CBot::RunMimicCommand(usercmd_t &botCmd)

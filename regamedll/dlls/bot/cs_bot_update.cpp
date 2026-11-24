@@ -28,10 +28,14 @@
 
 #include "precompiled.h"
 #include "bot/cs_bot_competitive.h"
+#include "bhop_race.h"
+#include "bhop_training.h"
 
 // Lightweight maintenance, invoked frequently
 void CCSBot::Upkeep()
 {
+	if (BhopTraining::Owns(this)) return;
+	if (BhopRace::Owns(this)) { m_lookYaw=m_lookAheadAngle; m_lookPitch=BhopRace::LookPitch(this,(m_goalPosition-pev->origin).Length2D(),m_goalPosition.z,GetFeetZ()); UpdateLookAngles(); return; }
 	if (CompetitiveBots::Pause(this)) return;
 	// Sensing runs more slowly than upkeep. Never track or keep rapid-firing
 	// at a target that has since moved behind cover or gained protection.
@@ -200,6 +204,7 @@ void CCSBot::Upkeep()
 // Heavyweight processing, invoked less often
 void CCSBot::Update()
 {
+	if (BhopTraining::Owns(this)) return;
 	if (CompetitiveBots::Pause(this)) return;
 	if (TheCSBots()->IsAnalysisRequested() && m_processMode == PROCESS_NORMAL)
 	{
@@ -311,6 +316,26 @@ void CCSBot::Update()
 		// assume that we "clear" an area of enemies when we enter it
 		m_currentArea->SetClearedTimestamp(m_iTeam - 1);
 	}
+
+	if (m_isJumpCrouching)
+	{
+		const float duration = 0.75f;
+		const float crouchDelayTime = 0.05f;
+		const float standUpTime = 0.6f;
+		float elapsed = gpGlobals->time - m_jumpCrouchTimestamp;
+
+		if (elapsed > crouchDelayTime && elapsed < standUpTime)
+			Crouch();
+
+		if (elapsed >= standUpTime)
+			StandUp();
+
+		if (elapsed > duration)
+			m_isJumpCrouching = false;
+	}
+
+
+	if (UpdateBhopRace()) return;
 
 	// update approach points
 	const float recomputeApproachPointTolerance = 50.0f;
@@ -588,22 +613,6 @@ void CCSBot::Update()
 		m_avoid = nullptr;
 	}
 
-	if (m_isJumpCrouching)
-	{
-		const float duration = 0.75f;
-		const float crouchDelayTime = 0.05f;
-		const float standUpTime = 0.6f;
-		float elapsed = gpGlobals->time - m_jumpCrouchTimestamp;
-
-		if (elapsed > crouchDelayTime && elapsed < standUpTime)
-			Crouch();
-
-		if (elapsed >= standUpTime)
-			StandUp();
-
-		if (elapsed > duration)
-			m_isJumpCrouching = false;
-	}
 
 	// if we're using a sniper rifle and are no longer attacking, stop looking thru scope
 	if (!IsAtHidingSpot() && !IsAttacking() && IsUsingSniperRifle() && IsUsingScope())

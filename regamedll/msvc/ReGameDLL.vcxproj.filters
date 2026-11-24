@@ -231,6 +231,11 @@
     <ClCompile Include="..\dlls\bot\cs_bot_manager.cpp">
       <Filter>dlls\bot</Filter>
     </ClCompile>
+    <ClCompile Include="..\dlls\bot\bhop_race.cpp" />
+    <ClCompile Include="..\dlls\bot\bhop_match.cpp" />
+    <ClCompile Include="..\dlls\bot\bhop_training.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\dlls\bot\cs_bot_competitive.cpp">
       <Filter>dlls\bot</Filter>
     </ClCompile>

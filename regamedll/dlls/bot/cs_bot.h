@@ -596,6 +596,10 @@ public:
 
 	// looking around
 	void SetLookAngles(float yaw, float pitch);			// set our desired look angles
+	bool UpdateBhopRace();
+	void ReportBhopFailure(const char *reason);
+	bool CanWalkSteps(const Vector &goal);
+	void ApplyBhopMovement(usercmd_t &cmd, float dt);
 	void UpdateLookAngles();							// move actual view angles towards desired ones
 	void UpdateLookAround(bool updateNow = false);		// update "looking around" mechanism
 	void InhibitLookAround(float duration);				// block all "look at" and "looking around" behavior for given duration - just look ahead
@@ -1440,9 +1444,12 @@ inline void CCSBot::ResetWaitForHostagePatience()
 	m_inhibitWaitingForHostageTimer.Invalidate();
 }
 
+namespace BhopRace { bool Owns(const CCSBot *bot); float RouteMultiplier(const CCSBot *bot,const CNavArea *area); }
+
 inline float CCSBot::GetFeetZ() const
 {
-	if (IsCrouching())
+	// Race posture requests can differ from the hull while standing is blocked.
+	if (BhopRace::Owns(this) ? (pev->flags & FL_DUCKING) != 0 : IsCrouching())
 	{
 		const Vector crouch(0, 0, -StepHeight);
 		return (pev->origin + crouch).z;
@@ -1627,7 +1634,7 @@ public:
 			}
 
 			// compute distance travelled along path so far
-			float cost = dist + fromArea->GetCostSoFar();
+			float cost = dist * BhopRace::RouteMultiplier(m_bot,area) + fromArea->GetCostSoFar();
 
 			// zombies ignore all path penalties
 			if (cv_bot_zombie.value > 0.0f)
@@ -1669,7 +1676,7 @@ public:
 			if (area->GetAttributes() & NAV_CROUCH)
 			{
 				// these areas are very slow to move through
-				real_t crouchPenalty = (m_route == FASTEST_ROUTE) ? 20.0f : 5.0f;
+				real_t crouchPenalty = BhopRace::Owns(m_bot) ? 2.0f : (m_route == FASTEST_ROUTE) ? 20.0f : 5.0f;
 
 				// avoid crouch areas if we are rescuing hostages
 				if (m_bot->GetHostageEscortCount())
@@ -1685,7 +1692,7 @@ public:
 			{
 				// jumping can slow you down
 				//const float jumpPenalty = (m_route == FASTEST_ROUTE) ? 100.0f : 0.5f;
-				const float jumpPenalty = 1.0f;
+				const float jumpPenalty = BhopRace::Owns(m_bot) ? 0.2f : 1.0f;
 				cost += jumpPenalty * dist;
 			}
 
@@ -1695,7 +1702,7 @@ public:
 				cost += dist * dangerFactor * area->GetDanger(m_bot->m_iTeam - 1);
 			}
 
-			if (!m_bot->IsAttacking())
+			if (!m_bot->IsAttacking() && !BhopRace::Owns(m_bot))
 			{
 				// add in cost of teammates in the way
 				// approximate density of teammates based on area

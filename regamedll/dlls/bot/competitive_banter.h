@@ -13,7 +13,7 @@ struct CasualBanterSchedule {
    }
    void sent (float now) { next = now + 100.0f + (sequence++ % 3) * 15.0f; }
 };
-inline const char *casualBanterLine (unsigned sequence) {
+inline const char *casualBanterLine (unsigned sequence, bool winter = false) {
    constexpr const char *lines[] = {
       "how's the game treating you?",
       "nice movement. now try dodging the bullets",
@@ -24,5 +24,8 @@ inline const char *casualBanterLine (unsigned sequence) {
       "one more game after this?",
       "alright, warmup's over. probably"
    };
-   return lines[sequence % 8];
+   const unsigned index = sequence % 8;
+   if (winter && index == 1) return "nice movement. now try dodging the snowballs";
+   if (winter && index == 4) return "quick toss or full charge?";
+   return lines[index];
 }

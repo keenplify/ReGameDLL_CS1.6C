@@ -27,6 +27,7 @@
 */
 
 #include "precompiled.h"
+#include "bhop_race.h"
 #include "cs_bot_competitive.h"
 #include "competitive_traffic.h"
 #include "competitive_policy.h"
@@ -825,8 +826,8 @@ int CCSBot::FindPathPoint(float aheadRange, Vector *point, int *prevIndex)
 		return m_pathIndex;
 	}
 
-	// if we are crouching, just follow the path exactly
-	if (IsCrouching())
+	// Follow the physical race hull when a standing request is blocked.
+	if (BhopRace::Owns(this) ? (pev->flags & FL_DUCKING) != 0 : IsCrouching())
 	{
 		// we want to move to the immediately next point along the path from where we are now
 		int index = startIndex + 1;
@@ -1106,7 +1107,8 @@ struct PassingState {
 };
 PassingState passing[MAX_CLIENTS+1];
 struct NavigationBlock {
- int user=0;
+ int user=0,jumpAttempts=0;
+ Vector jumpOrigin {0,0,0};
  unsigned from=0,to=0;
  Vector failedGoal {0,0,0}, failedOrigin {0,0,0};
  float goalUntil=0;
@@ -1127,10 +1129,38 @@ bool PermanentBarrier(const TraceResult &tr) {
   || FClassnameIs(hit,"func_wall_toggle")
   || (FClassnameIs(hit,"func_breakable") && hit->takedamage==DAMAGE_NO);
 }
+// Probe a low obstacle with the player's full hull, including headroom and
+// landing support. A blocked trace alone is never permission to jump.
+bool CanJumpLowObstacle(CCSBot *bot,const Vector &goal) {
+ if((!CompetitiveBots::Enabled() && !BhopRace::Owns(bot)) || !bot->IsAlive()
+    || bot->IsCrouching() || bot->IsJumping() || bot->IsUsingLadder() || bot->IsOnLadder()
+    || !(bot->pev->flags&FL_ONGROUND) || bot->pev->waterlevel || bot->IsAttacking())return false;
+ Vector direction=goal-bot->pev->origin;direction.z=0;
+ if(direction.NormalizeInPlace()<48)return false;
+ TraceResult low,step,up,across,landing;
+ const Vector start=bot->pev->origin;
+ const Vector near=start+direction*48;
+ UTIL_TraceHull(start,near,dont_ignore_monsters,human_hull,bot->edict(),&low);
+ if(!PermanentBarrier(low))return false;
+ UTIL_TraceHull(start+Vector(0,0,StepHeight),near+Vector(0,0,StepHeight),
+    dont_ignore_monsters,human_hull,bot->edict(),&step);
+ if(!PermanentBarrier(step))return false; // ordinary stairs need no jump
+ if(BhopRace::Owns(bot) && bot->CanWalkSteps(goal))return false;
+ const Vector raised=start+Vector(0,0,JumpCrouchHeight-2);
+ const Vector beyond=raised+direction*80;
+ auto clear=[](const TraceResult &tr){return !tr.fStartSolid && !tr.fAllSolid && tr.flFraction>=.9999f;};
+ UTIL_TraceHull(start,raised,dont_ignore_monsters,human_hull,bot->edict(),&up);
+ if(!clear(up))return false;
+ UTIL_TraceHull(raised,beyond,dont_ignore_monsters,human_hull,bot->edict(),&across);
+ if(!clear(across))return false;
+ UTIL_TraceHull(beyond,beyond-Vector(0,0,JumpCrouchHeight+62),dont_ignore_monsters,human_hull,bot->edict(),&landing);
+ if(landing.fStartSolid || landing.fAllSolid || landing.flFraction>=1 || landing.vecPlaneNormal.z<.7f)return false;
+ return true;
+}
 // Collision, not visibility, determines whether a player can cross a fence/clip wall.
 bool BlockedNavigationStep(CCSBot *bot,const Vector &goal,unsigned from,unsigned to) {
  auto &state=NavigationState(bot);
- if(!CompetitiveBots::Enabled() || bot->IsUsingLadder() || bot->IsOnLadder()
+ if((!CompetitiveBots::Enabled() && !BhopRace::Owns(bot)) || bot->IsUsingLadder() || bot->IsOnLadder()
     || bot->IsJumping() || bot->IsNearJump() || !(bot->pev->flags&FL_ONGROUND)
     || bot->pev->waterlevel>1) {state.progress.Reset();return false;}
  Vector direction=goal-bot->pev->origin;direction.z=0;
@@ -1165,11 +1195,18 @@ unsigned TrafficPriority(CBasePlayer *player) {
 }
 
 bool CompetitiveBots::IsBlockedNavEdge(CCSBot *bot,CNavArea *from,CNavArea *to) {
- return Enabled() && from && to && NavigationState(bot).memory.Contains(from->GetID(),to->GetID(),gpGlobals->time);
+ return (Enabled() || BhopRace::Owns(bot)) && from && to && NavigationState(bot).memory.Contains(from->GetID(),to->GetID(),gpGlobals->time);
 }
-void CompetitiveBots::ResetTraffic() {
+void CompetitiveBots::ResetTraffic(bool preserveRaceNavigation) {
  for(auto &state:passing)state=PassingState {};
- for(auto &state:navigationBlocks)state=NavigationBlock {};
+ // Disabled competitive cleanup must not erase the race recovery clock.
+ // Explicit map/round resets use the default false and still clear every slot.
+ for(int slot=1;slot<=MAX_CLIENTS;++slot) {
+  CBaseEntity *entity=UTIL_PlayerByIndex(slot);
+  if(preserveRaceNavigation && entity && entity->IsPlayer() && static_cast<CBasePlayer *>(entity)->IsBot()
+      && BhopRace::Owns(static_cast<CCSBot *>(entity)))continue;
+  navigationBlocks[slot]=NavigationBlock {};
+ }
 }
 
 bool CCSBot::IsHeadOnFriend(CBasePlayer *other,const Vector *goalPos) const
@@ -1193,10 +1230,11 @@ bool CCSBot::IsHeadOnFriend(CBasePlayer *other,const Vector *goalPos) const
 // short lease so two bots cannot alternate between waiting and pushing.
 bool CCSBot::YieldToFriend(const Vector *goalPos)
 {
+ if(BhopRace::Owns(this))return false;
  auto &state=passing[entindex()];
  int user=GETPLAYERUSERID(edict());float now=gpGlobals->time;
  if(state.user!=user || state.started>now){state=PassingState {};state.user=user;}
- if(!CompetitiveBots::Enabled() || !IsAlive() || IsAttacking() || IsEnemyVisible()
+ if((!CompetitiveBots::Enabled() && !BhopRace::Owns(this)) || !IsAlive() || IsAttacking() || IsEnemyVisible()
     || GetTimeSinceAttacked()<1 || IsUsingLadder() || IsOnLadder() || IsJumping() || IsNearJump()
     || !(pev->flags&FL_ONGROUND) || pev->waterlevel>1 || IsDefusingBomb() || IsEscapingFromBomb()
     || GetTask()==PLANT_BOMB || GetTask()==RESCUE_HOSTAGES) {state.until=0;return false;}
@@ -1259,6 +1297,7 @@ bool CCSBot::YieldToFriend(const Vector *goalPos)
 // Return true if a friend is between us and the given position
 bool CCSBot::IsFriendInTheWay(const Vector *goalPos) const
 {
+ if(BhopRace::Owns(this))return false;
 	// do this check less often to ease CPU burden
 	if (!m_avoidFriendTimer.IsElapsed())
 	{
@@ -1296,7 +1335,7 @@ bool CCSBot::IsFriendInTheWay(const Vector *goalPos) const
 
 		// Only the yielding bot waits in a head-on encounter. Native waiting
 		// must not make the player with right of way stop as well.
-		if (CompetitiveBots::Enabled() && IsHeadOnFriend(pPlayer,goalPos)
+		if ((CompetitiveBots::Enabled() || BhopRace::Owns(this)) && IsHeadOnFriend(pPlayer,goalPos)
 		    && !CompetitiveTraffic::Yields(TrafficPriority(const_cast<CCSBot *>(this)),TrafficPriority(pPlayer),entindex(),i))
 			continue;
 
@@ -1649,6 +1688,21 @@ CCSBot::PathResult CCSBot::UpdatePathMovement(bool allowSpeedChange)
 		UTIL_DrawBeamPoints(pev->origin, adjustedGoal + Vector(0, 0, 50), 1, 255, 0, 255);
 	}
 
+ auto &jumpState=NavigationState(this);
+ if((pev->origin-jumpState.jumpOrigin).Length2D()>32)jumpState.jumpAttempts=0;
+ if((CompetitiveBots::Enabled() || BhopRace::Owns(this)) && jumpState.jumpAttempts>=3) {
+  const unsigned from=m_path[Q_max(0,m_pathIndex-1)].area->GetID();
+  const unsigned to=m_path[m_pathIndex].area->GetID();
+  jumpState.memory.Add(from,to,gpGlobals->time);
+  if(BhopRace::Owns(this))SERVER_PRINT(UTIL_VarArgs("BHOP_RACE failed_jump_repath slot=%d from=%u to=%u\n",entindex(),from,to));
+  jumpState.jumpAttempts=0;ClearMovement();StandUp();ResetStuckMonitor();DestroyPath();return PATH_FAILURE;
+ }
+ if(CanJumpLowObstacle(this,m_goalPosition) && DiscontinuityJump(GetFeetZ()+JumpCrouchHeight-2,false,MUST_JUMP)) {
+  if(!jumpState.jumpAttempts)jumpState.jumpOrigin=pev->origin;
+  ++jumpState.jumpAttempts;
+  if(BhopRace::Owns(this))SERVER_PRINT(UTIL_VarArgs("BHOP_RACE obstacle_crouch_jump slot=%d\n",entindex()));
+  MoveTowardsPosition(&m_goalPosition);return PROGRESSING;
+ }
  // A stale nav connection can cross a solid fence or invisible player clip.
  // Remember the failed direction briefly so the next A* search can route around it.
  if(BlockedNavigationStep(this,m_goalPosition,m_path[Q_max(0,m_pathIndex-1)].area->GetID(),
@@ -1817,7 +1871,7 @@ bool CCSBot::ComputePath(CNavArea *goalArea, const Vector *goal, RouteType route
  // An area that straddles an obstacle must not keep producing the same trivial
  // route. Only reject that nearby endpoint, not other destinations in the area.
  auto &blocked=NavigationState(this);
- if(CompetitiveBots::Enabled() && blocked.goalUntil>gpGlobals->time
+ if((CompetitiveBots::Enabled() || BhopRace::Owns(this)) && blocked.goalUntil>gpGlobals->time
     && blocked.goalUntil-gpGlobals->time<=20
     && (pathEndPosition-blocked.failedGoal).LengthSquared()<64*64
     && (pev->origin-blocked.failedOrigin).LengthSquared()<128*128)return false;
@@ -1854,7 +1908,7 @@ bool CCSBot::ComputePath(CNavArea *goalArea, const Vector *goal, RouteType route
 
 	if (count == 1)
 	{
-  if(CompetitiveBots::Enabled() && !pathToGoalExists)return false;
+  if((CompetitiveBots::Enabled() || BhopRace::Owns(this)) && !pathToGoalExists)return false;
 		BuildTrivialPath(&pathEndPosition);
 		return true;
 	}

@@ -27,6 +27,7 @@
 */
 
 #include "precompiled.h"
+#include "bhop_race.h"
 
 // Reset the stuck-checker.
 void CCSBot::ResetStuckMonitor()
@@ -123,6 +124,38 @@ void CCSBot::StuckCheck()
 }
 
 // Check if we need to jump due to height change
+// Simulate short engine-sized steps instead of interpreting several stair treads
+// as one tall ledge. Every sample requires standing-hull clearance and support.
+bool CCSBot::CanWalkSteps(const Vector &goal)
+{
+    if (!(pev->flags & FL_ONGROUND) || IsCrouching() || IsOnLadder()) return false;
+    Vector direction=goal-pev->origin;direction.z=0;
+    if (direction.NormalizeInPlace()<48) return false;
+    Vector current=pev->origin;
+    const float initialZ=current.z;
+    for (int i=0;i<8;++i) {
+        TraceResult up,across,down;
+        const Vector raised=current+Vector(0,0,StepHeight);
+        UTIL_TraceHull(current,raised,dont_ignore_monsters,human_hull,edict(),&up);
+        if(up.fStartSolid || up.fAllSolid || up.flFraction<.9999f)return false;
+        const Vector next=raised+direction*6;
+        UTIL_TraceHull(raised,next,dont_ignore_monsters,human_hull,edict(),&across);
+        if(across.fStartSolid || across.fAllSolid || across.flFraction<.9999f)return false;
+        UTIL_TraceHull(next,next-Vector(0,0,2*StepHeight),dont_ignore_monsters,human_hull,edict(),&down);
+        if(down.fStartSolid || down.fAllSolid || down.flFraction>=1 || down.vecPlaneNormal.z<.7f)return false;
+        if(std::fabs(down.vecEndPos.z-current.z)>StepHeight+.1f)return false;
+        current=down.vecEndPos;
+    }
+    if(std::fabs(current.z-initialZ)<=StepHeight)return false;
+    static float nextLog[MAX_CLIENTS+1] {};
+    const int slot=entindex();
+    if(slot>0 && slot<=MAX_CLIENTS && (gpGlobals->time>=nextLog[slot] || nextLog[slot]-gpGlobals->time>10)) {
+        nextLog[slot]=gpGlobals->time+10;
+        SERVER_PRINT(UTIL_VarArgs("BHOP_RACE walk_steps slot=%d pos=%.0f,%.0f,%.0f rise=%.0f\n",slot,pev->origin.x,pev->origin.y,GetFeetZ(),current.z-initialZ));
+    }
+    return true;
+}
+
 bool CCSBot::DiscontinuityJump(float ground, bool onlyJumpDown, bool mustJump)
 {
 	// don't try to jump again.
@@ -130,6 +163,8 @@ bool CCSBot::DiscontinuityJump(float ground, bool onlyJumpDown, bool mustJump)
 		return false;
 
 	real_t dz = ground - GetFeetZ();
+	if (BhopRace::Owns(this) && std::fabs(dz)>StepHeight && CanWalkSteps(m_goalPosition))
+		return false;
 
 	if (dz > StepHeight && !onlyJumpDown)
 	{

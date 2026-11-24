@@ -27,6 +27,9 @@
 */
 
 #include "precompiled.h"
+#include "bhop_training.h"
+#include "bhop_race.h"
+#include "bhop_training.h"
 #include "bot/cs_bot_competitive.h"
 
 CBotManager *TheBots = nullptr;
@@ -144,6 +147,8 @@ void CCSBotManager::RestartRound()
 // Called each frame
 void CCSBotManager::StartFrame()
 {
+	BhopTraining::Frame();
+	BhopRace::Frame();
 	CompetitiveBots::Frame();
 	// EXTEND
 	CBotManager::StartFrame();
@@ -234,6 +239,8 @@ bool CCSBotManager::IsOnOffense(CBasePlayer *pPlayer) const
 // Invoked when a map has just been loaded
 void CCSBotManager::ServerActivate()
 {
+	BhopTraining::Reset();
+	BhopRace::Reset();
 	CompetitiveBots::ResetNavigationLearning();
 	CompetitiveBots::Reset();
 	m_isMapDataLoaded = false;
@@ -1343,6 +1350,8 @@ bool CCSBotManager::LoadNavigationMap()
 
 	// Clear navigation map data from previous map
 	DestroyNavigationMap();
+
+	if (BhopTraining::NoNavigation()) return false;
 
 	// Try to load the map's navigation file
 	NavErrorType navStatus = ::LoadNavigationMap();

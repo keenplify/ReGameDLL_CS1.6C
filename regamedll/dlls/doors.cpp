@@ -1,4 +1,5 @@
 #include "precompiled.h"
+#include "bot/bhop_race.h"
 
 #if !defined(DOOR_ASSERT)
 #undef DbgAssert
@@ -468,6 +469,10 @@ void CBaseDoor::Use(CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useT
 // Causes the door to "do its thing", i.e. start moving, and cascade activation.
 int CBaseDoor::DoorActivate()
 {
+	// Private race bots share a single opener; normal doors and players are unaffected.
+	if (!BhopRace::AllowDoorActivation(this, m_hActivator))
+		return 0;
+
 	if (!UTIL_IsMasterTriggered(m_sMaster, m_hActivator))
 		return 0;
 

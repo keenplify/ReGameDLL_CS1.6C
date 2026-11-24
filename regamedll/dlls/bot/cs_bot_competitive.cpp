@@ -3,6 +3,9 @@
 // Team phrase parser ported from keenplify/yapb-comms at 76b82b5 (MIT).
 #include "precompiled.h"
 #include "competitive_banter.h"
+#include "bhop_race.h"
+#include "bhop_training.h"
+#include "bhop_match.h"
 #include "cs_bot_competitive.h"
 #include "competitive_policy.h"
 #include "competitive_execution.h"
@@ -787,7 +790,7 @@ void MaintainCasualBanter() {
   if(!InitiatesChat(bot) || SimulatedAway(bot) || bot->IsEnemyVisible() || bot->IsAttacking()
      || bot->GetTimeSinceAttacked()<3 || State(bot).reply.active || gpGlobals->time<State(bot).nextChat)continue;
   // Do not ask a model to escalate the tone. Normal Queue handles typing and mute/dead rules.
-  if(Speak(bot,nullptr,false,casualBanterLine(casualBanter.sequence),false))casualBanter.sent(gpGlobals->time);
+  if(Speak(bot,nullptr,false,casualBanterLine(casualBanter.sequence, CVAR_GET_FLOAT("sw_toggle")==1),false))casualBanter.sent(gpGlobals->time);
   break;
  }
 }
@@ -856,9 +859,9 @@ void LoadAliases() {
 
 void RegisterCVars()
 {
-
-
-
+	BhopTraining::Register();
+	BhopMatch::Register();
+	BhopRace::Register();
 	RegisterGrenadeCVars(); RegisterTacticsCVars(); LoadAliases();
 	CVAR_REGISTER(&highPing);CVAR_REGISTER(&mediumPing);CVAR_REGISTER(&combatMovement); CVAR_REGISTER(&coverPeek); CVAR_REGISTER(&rifleBuy); CVAR_REGISTER(&captainMode); CVAR_REGISTER(&pingComms); CVAR_REGISTER(&showLatency); CVAR_REGISTER(&pingMin); CVAR_REGISTER(&pingMax);
 	CVAR_REGISTER(&aiBridge); CVAR_REGISTER(&queryHook); CVAR_REGISTER(&enabled); CVAR_REGISTER(&teamOrders); CVAR_REGISTER(&textChat); CVAR_REGISTER(&roundChat);
@@ -1391,7 +1394,7 @@ bool PauseForTyping(CCSBot *bot)
  return true;
 }
 
-void Reset()
+void Reset(bool preserveRaceNavigation)
 {
  for(auto &peek:coverPeeks) peek=CoverPeek {};
 	LoadCallouts();
@@ -1401,7 +1404,7 @@ void Reset()
 	ResetGrenades(true);
 	ResetCaptains();
  captainRoundStarted=-1;for(auto &gate:openingPlans)gate=OpeningPlanGate {};
- ResetTraffic();
+ ResetTraffic(preserveRaceNavigation);
  ResetTactics(true);
  for(auto &gate:tacticalGate)gate=TacticalCommsGate {};
  for(auto &time:humanCaptainUntil)time=0;
@@ -1462,8 +1465,8 @@ void Frame()
   publish(queryHook.value > 0 && IS_DEDICATED_SERVER(), list, count);
  }
 #endif
- if(TheNavAreaList.empty() && !TheCSBots()->IsLearningMap())for(int i=1;i<=gpGlobals->maxClients;++i){auto *p=Player(i);if(p && p->IsBot() && p->IsAlive()){TryNavigationLearning(static_cast<CCSBot *>(p));break;}}
-	if (!Enabled()) { Reset(); return; }
+ if(!BhopTraining::NoNavigation() && TheNavAreaList.empty() && !TheCSBots()->IsLearningMap())for(int i=1;i<=gpGlobals->maxClients;++i){auto *p=Player(i);if(p && p->IsBot() && p->IsAlive()){TryNavigationLearning(static_cast<CCSBot *>(p));break;}}
+	if (!Enabled()) { Reset(true); return; }
 	if (gpGlobals->time < nextFrame && nextFrame - gpGlobals->time < 1.0f) return;
 	nextFrame = gpGlobals->time + 0.1f;
 	PollAi();

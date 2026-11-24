@@ -27,6 +27,7 @@
 */
 
 #include "precompiled.h"
+#include "bhop_training.h"
 #include "bot/cs_bot_competitive.h"
 
 cvar_t cv_bot_enable                 = { "bot_enable", "0", 0, 0.0f, nullptr };
@@ -358,7 +359,7 @@ void CCSBot::SpawnBot()
 	SetState(&m_buyState);
 	SetTouch(&CCSBot::BotTouch);
 
-	if (TheNavAreaList.empty() && !TheCSBots()->IsLearningMap())
+	if (!BhopTraining::NoNavigation() && TheNavAreaList.empty() && !TheCSBots()->IsLearningMap())
 	{
 		CompetitiveBots::TryNavigationLearning(this);
 	}

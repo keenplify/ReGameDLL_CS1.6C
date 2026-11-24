@@ -111,6 +111,9 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug Play|Win32'">
       </ExcludedFromBuild>
     </ClCompile>
+    <ClCompile Include="..\dlls\bot\bhop_race.cpp" />
+    <ClCompile Include="..\dlls\bot\bhop_match.cpp" />
+    <ClCompile Include="..\dlls\bot\bhop_training.cpp" />
     <ClCompile Include="..\dlls\bot\cs_bot_competitive.cpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
       </ExcludedFromBuild>
