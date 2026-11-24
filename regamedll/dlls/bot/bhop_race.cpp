@@ -283,7 +283,11 @@ bool SpeedPractice(const CCSBot *bot){return Owns(bot) && SpeedObjective() && ph
 bool GroundStrafePractice(const CCSBot *bot){return SpeedPractice(bot) && objective.value==2;}
 bool SGSPractice(const CCSBot *bot){return Owns(bot) && phase==Phase::Running && objective.value==3;}
 bool UsesGroundStrafe(const CCSBot *bot){return Owns(bot) && phase==Phase::Running && objective.value==2;}
-bool LocalRecovery(const CCSBot *bot){return Owns(bot) && bot->entindex()>=1 && bot->entindex()<=32 && racers[bot->entindex()].localUntil>gpGlobals->time;}
+bool LocalRecovery(const CCSBot *bot) {
+    if (!Owns(bot)) return false;
+    const int slot=ENTINDEX(bot->pev->pContainingEntity);
+    return slot>=1 && slot<=32 && racers[slot].localUntil>gpGlobals->time;
+}
 float LookPitch(CCSBot *bot,float distance,float goalZ,float feetZ) {
     const int slot=bot->entindex();
     if(!Owns(bot)||slot<1||slot>32)return 0;
@@ -302,12 +306,12 @@ float LookPitch(CCSBot *bot,float distance,float goalZ,float feetZ) {
 }
 
 int MovementVariant(const CCSBot *bot) {
-    const int slot=bot->entindex();
+    const int slot=ENTINDEX(bot->pev->pContainingEntity);
     return Owns(bot) && slot>0 && slot<=32 ? racers[slot].variant : 0;
 }
 float RouteMultiplier(const CCSBot *bot,const CNavArea *area) {
     if(!Owns(bot) || !area)return 1;
-    const int slot=bot->entindex();if(slot<1 || slot>32)return 1;
+    const int slot=ENTINDEX(bot->pev->pContainingEntity);if(slot<1 || slot>32)return 1;
     const int variant=racers[slot].variant;if(variant==0)return 1;
     // Coherent regional preferences explore corridors, not random per-frame turns.
     const Vector &p=*area->GetCenter();
@@ -339,7 +343,7 @@ void Register(){
     });
 }
 void Reset(){doorUseGates.clear();doorDenialReports.clear();completedHeats=0;RestoreWinner();heatWinner=heatWinnerUser=0;nextSpectate=nextCameraSwitch=0;cameraMode=OBS_IN_EYE;routeTrials.clear();phase=Phase::Waiting;roster=0;settle=0;heat=0;for(auto &r:racers)r={};}
-bool Owns(const CCSBot *bot){return Active() && bot && bot->IsBot();}
+bool Owns(const CCSBot *bot){return Active() && bot != nullptr;}
 bool AllowDoorActivation(CBaseDoor *door,CBaseEntity *activator) {
     if(!Active() || !activator || !activator->IsPlayer() || !static_cast<CBasePlayer *>(activator)->IsBot())return true;
     const int slot=activator->entindex();

@@ -1139,10 +1139,10 @@ bool CanJumpLowObstacle(CCSBot *bot,const Vector &goal) {
  if(direction.NormalizeInPlace()<48)return false;
  TraceResult low,step,up,across,landing;
  const Vector start=bot->pev->origin;
- const Vector near=start+direction*48;
- UTIL_TraceHull(start,near,dont_ignore_monsters,human_hull,bot->edict(),&low);
+ const Vector probeEnd=start+direction*48;
+ UTIL_TraceHull(start,probeEnd,dont_ignore_monsters,human_hull,bot->edict(),&low);
  if(!PermanentBarrier(low))return false;
- UTIL_TraceHull(start+Vector(0,0,StepHeight),near+Vector(0,0,StepHeight),
+ UTIL_TraceHull(start+Vector(0,0,StepHeight),probeEnd+Vector(0,0,StepHeight),
     dont_ignore_monsters,human_hull,bot->edict(),&step);
  if(!PermanentBarrier(step))return false; // ordinary stairs need no jump
  if(BhopRace::Owns(bot) && bot->CanWalkSteps(goal))return false;
