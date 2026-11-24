@@ -28,7 +28,7 @@
 
 #include "precompiled.h"
 #include "bot/cs_bot_competitive.h"
-#include "bot/nav_generate.h"
+#include "game_shared/bot/nav_generate.h"
 
 const float updateTimesliceDuration = 0.5f;
 

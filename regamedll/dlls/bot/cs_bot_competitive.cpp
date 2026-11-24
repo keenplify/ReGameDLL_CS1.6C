@@ -1,4 +1,3 @@
-#include "competitive_site_camp.h"
 // SPDX-License-Identifier: MIT
 // Team phrase parser ported from keenplify/yapb-comms at 76b82b5 (MIT).
 #include "precompiled.h"
@@ -6,6 +5,7 @@
 #include "bhop_race.h"
 #include "bhop_training.h"
 #include "bhop_match.h"
+#include "competitive_site_camp.h"
 #include "cs_bot_competitive.h"
 #include "competitive_policy.h"
 #include "competitive_execution.h"
@@ -656,8 +656,8 @@ void MaintainCaptains() {
    int members=0,nearby=0;bool bombNearby=true;
    for(int slot=1;slot<=gpGlobals->maxClients;++slot) {
     auto *p=Player(slot);if(!p || !p->IsAlive() || !p->IsBot() || p->m_iTeam!=team || GETPLAYERUSERID(p->edict())!=plan.ids[slot] || CaptainPlanIndependent(static_cast<CCSBot *>(p)))continue;
-    auto *middle=Destination(TeamOrder::AllMid,p->pev->origin);bool near=middle && (*middle->GetCenter()-p->pev->origin).LengthSquared()<400*400;
-    ++members;if(near)++nearby;if(static_cast<CCSBot *>(p)->IsCarryingBomb() && !near)bombNearby=false;
+    auto *middle=Destination(TeamOrder::AllMid,p->pev->origin);bool nearMiddle=middle && (*middle->GetCenter()-p->pev->origin).LengthSquared()<400*400;
+    ++members;if(nearMiddle)++nearby;if(static_cast<CCSBot *>(p)->IsCarryingBomb() && !nearMiddle)bombNearby=false;
    }
    if(midStageReady(members,nearby,bombNearby,gpGlobals->time-plan.stageStarted)) {
     plan.staged=false;plan.revision=++planRevision;
