@@ -205,8 +205,16 @@ int main()
  CHECK(parseTeamAllocation("3a 1mid 1b", split) && split.a==3 && split.mid==1 && split.b==1);
  for(auto bad:{"3a 2a","0a 5b","3a 2b?","3a 2b;quit","go 3a 2b","9a 9b"}) CHECK(!parseTeamAllocation(bad,split));
 	using namespace CompetitiveBotPolicy;
- CHECK(ReplyDelay(2, 0.25f) > 1.5f);
- CHECK(ReplyDelay(90, 0.65f) < 3.1f);
+ const Recipient turbo{12, 1, true}, keen{24, 2, true};
+ const ChatPartner publicQuestion{3, turbo, keen, 4, false, 130.0f};
+ CHECK(publicQuestion.Current(11, 4, false, turbo, keen));
+ CHECK(!publicQuestion.Current(11, 4, true, turbo, keen));
+ CHECK(!publicQuestion.Current(11, 5, false, turbo, keen));
+ CHECK(!publicQuestion.Current(130, 4, false, turbo, keen));
+ CHECK(!publicQuestion.Current(11, 4, false, Recipient{15,1,true}, keen));
+ CHECK(!publicQuestion.Current(11, 4, false, turbo, Recipient{24,2,false}));
+ CHECK(ReplyDelay(2, 0.25f) >= 1.0f);
+ CHECK(ReplyDelay(90, 0.65f) > ReplyDelay(60, 0.65f) + 3.0f);
  CHECK(ReplyDelay(90, 0.65f) == ReplyDelay(1000, 0.65f));
  CHECK(ReplyDelay(30, 0.25f) > ReplyDelay(2, 0.25f));
  for(int level=0;level<5;++level){CHECK(CompetitiveExecution::Reaction(level,true)>=.108f-.0001f);CHECK(CompetitiveExecution::Get(level).tracking>0);if(level)CHECK(CompetitiveExecution::Get(level).error<CompetitiveExecution::Get(level-1).error);}

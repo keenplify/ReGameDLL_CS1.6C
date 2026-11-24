@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 // Team phrase parser ported from keenplify/yapb-comms at 76b82b5 (MIT).
 #include "precompiled.h"
+#include "competitive_banter.h"
 #include "cs_bot_competitive.h"
 #include "competitive_policy.h"
 #include "competitive_execution.h"
@@ -53,6 +54,7 @@ struct Reply {
 	bool active = false;
 	bool teamOnly = false;
 	bool tactical = false;
+ bool conversational = false;
 	bool planAnnouncement = false;
  unsigned planRevision = 0;
  bool captainReply = false;
@@ -60,7 +62,7 @@ struct Reply {
 	int listenerSlot = 0, subjectSlot = 0;
 	Recipient subject;
 	Recipient speaker, listener;
-	float issued = 0, due = 0, deadline = 0, typingStart = 0;
+	float issued = 0, due = 0, deadline = 0, typingStart = 0, lastTypingCheck = 0;
 	unsigned round = 0;
 	char text[91] = {};
 	char aiToken[64] = {};
@@ -70,10 +72,13 @@ struct Slot {
 	float nextChat = 0;
 	float nextOrder = 0;
 	float nextPing = 0, nextComplaint = 0;
- int hurtActor=0,hurtId=0,partnerSlot=0,partnerId=0;float hurtAt=0,partnerUntil=0;
+ int hurtActor=0,hurtId=0;float hurtAt=0;
+ CompetitiveBotPolicy::ChatPartner partner;
+ char question[91]={};
 	Reply reply;
 };
 Slot slots[MAX_CLIENTS + 1];
+CasualBanterSchedule casualBanter;
 bool mobilityDecided[MAX_CLIENTS+1]={}, mobilityPreferred[MAX_CLIENTS+1]={};
 CompetitiveBotPolicy::RunGunWindow runGunWindows[MAX_CLIENTS+1];
 struct CoverPeek {
@@ -197,11 +202,18 @@ bool CanHear(CBasePlayer *bot, CBasePlayer *human, bool teamOnly)
 		&& !CSGameRules()->m_VoiceGameMgr.PlayerHasBlockedPlayer(human, bot);
 }
 
-bool Queue(CCSBot *bot, CBasePlayer *human, bool teamOnly, const char *line, bool tactical = false)
+void ScheduleTyping(Reply &reply, float start)
+{
+ reply.typingStart = reply.lastTypingCheck = start;
+ reply.due = start + CompetitiveBotPolicy::ReplyDelay(Q_strlen(reply.text), RANDOM_FLOAT(0.25f, 0.65f));
+ reply.deadline = reply.due + (reply.tactical ? 3.0f : 15.0f);
+}
+
+bool Queue(CCSBot *bot, CBasePlayer *human, bool teamOnly, const char *line, bool tactical = false, bool answering = false)
 {
 	if (IsSilentSubstitute(bot) || !textChat.value || !CombatTeam(bot) || SimulatedAway(bot) || (teamOnly && Ffa())) return false;
 	auto &state = State(bot);
-	if (state.reply.active || gpGlobals->time < state.nextChat) return false;
+	if (state.reply.active || (!answering && gpGlobals->time < state.nextChat)) return false;
 	if (human && !CanHear(bot, human, teamOnly)) return false;
 	Reply reply;
 	reply.active = true;
@@ -211,11 +223,9 @@ bool Queue(CCSBot *bot, CBasePlayer *human, bool teamOnly, const char *line, boo
 	reply.listener = Identity(human);
 	reply.listenerSlot = human ? human->entindex() : 0;
 	reply.issued = gpGlobals->time;
-	reply.typingStart = gpGlobals->time + 0.25f;
-	reply.due = gpGlobals->time + CompetitiveBotPolicy::ReplyDelay(Q_strlen(line), RANDOM_FLOAT(0.25f, 0.65f));
-	reply.deadline = gpGlobals->time + 4.0f;
 	reply.round = roundSerial;
 	Q_strlcpy(reply.text, line);
+	ScheduleTyping(reply, gpGlobals->time + 0.25f);
 	state.reply = reply;
 	state.nextChat = gpGlobals->time + (human ? 2.0f : 10.0f);
 	return true;
@@ -281,9 +291,7 @@ void AskAi(CCSBot *bot, CBasePlayer *human, bool teamOnly, const char *text, con
 #endif
  if (written <= 0 || !closed || rename(tmp, target)) { remove(tmp); return; }
  Q_strlcpy(reply.aiToken, token);
- reply.due = gpGlobals->time + 7.0f;
- reply.typingStart = reply.due - 1.5f;
- reply.deadline = gpGlobals->time + 9.0f;
+ ScheduleTyping(reply, gpGlobals->time + 7.0f);
  aiBusyUntil = gpGlobals->time + 8.0f;
 }
 void PollAi() {
@@ -301,12 +309,10 @@ void PollAi() {
   if (*c < 32 || *c == 127 || *c == '"' || *c == ';' || *c == '\\' || *c == '%') return;
  for (auto &slot : slots) {
   auto &r = slot.reply;
-  if (r.active && *r.aiToken && !strcmp(r.aiToken, data) && gpGlobals->time <= r.deadline) {
+  if (r.active && *r.aiToken && !strcmp(r.aiToken, data) && gpGlobals->time < r.typingStart) {
    Q_strlcpy(r.text, tab);
-   const float typed = r.issued + CompetitiveBotPolicy::ReplyDelay(len, RANDOM_FLOAT(0.25f, 0.65f));
-   const float received = gpGlobals->time + RANDOM_FLOAT(0.45f, 0.8f);
-   r.due = typed > received ? typed : received;
-   r.typingStart = gpGlobals->time;
+   ScheduleTyping(r, gpGlobals->time);
+   aiBusyUntil = gpGlobals->time;
    r.aiToken[0] = 0; break;
   }
  }
@@ -770,6 +776,21 @@ bool Banter(CCSBot *bot,CBasePlayer *subject,bool teamOnly,const char *line) {
  AskAi(bot,nullptr,teamOnly,line,"banter",subject);
  return true;
 }
+void MaintainCasualBanter() {
+ if(!textChat.value || !roundChat.value || Completed() || !casualBanter.due(gpGlobals->time))return;
+ bool humanPresent=false;
+ for(int i=1;i<=gpGlobals->maxClients;++i){auto *p=Player(i);if(p && !p->IsBot() && CombatTeam(p)){humanPresent=true;break;}}
+ if(!humanPresent || TheCSBots()->IsBombPlanted())return;
+ for(int i=1;i<=gpGlobals->maxClients;++i){
+  auto *p=Player(i);if(!p || !p->IsBot() || !p->IsAlive())continue;
+  auto *bot=static_cast<CCSBot *>(p);
+  if(!InitiatesChat(bot) || SimulatedAway(bot) || bot->IsEnemyVisible() || bot->IsAttacking()
+     || bot->GetTimeSinceAttacked()<3 || State(bot).reply.active || gpGlobals->time<State(bot).nextChat)continue;
+  // Do not ask a model to escalate the tone. Normal Queue handles typing and mute/dead rules.
+  if(Speak(bot,nullptr,false,casualBanterLine(casualBanter.sequence),false))casualBanter.sent(gpGlobals->time);
+  break;
+ }
+}
 bool ReactToSpree(CBasePlayer *player,int kills) {
  // An opponent praising a 3k reads like team chat in free-for-all.
  if(!Enabled() || Completed() || Ffa() || !roundChat.value || !textChat.value || kills<3 || !CombatTeam(player))return false;
@@ -835,6 +856,9 @@ void LoadAliases() {
 
 void RegisterCVars()
 {
+
+
+
 	RegisterGrenadeCVars(); RegisterTacticsCVars(); LoadAliases();
 	CVAR_REGISTER(&highPing);CVAR_REGISTER(&mediumPing);CVAR_REGISTER(&combatMovement); CVAR_REGISTER(&coverPeek); CVAR_REGISTER(&rifleBuy); CVAR_REGISTER(&captainMode); CVAR_REGISTER(&pingComms); CVAR_REGISTER(&showLatency); CVAR_REGISTER(&pingMin); CVAR_REGISTER(&pingMax);
 	CVAR_REGISTER(&aiBridge); CVAR_REGISTER(&queryHook); CVAR_REGISTER(&enabled); CVAR_REGISTER(&teamOrders); CVAR_REGISTER(&textChat); CVAR_REGISTER(&roundChat);
@@ -1343,15 +1367,22 @@ void ReleaseRifleTap(CCSBot *bot)
  }
 }
 
+bool TypingInterrupted(CCSBot *bot)
+{
+ const bool carryingSnowball = bot->IsUsingHEGrenade() && CVAR_GET_FLOAT("sw_toggle")==1
+     && !bot->IsThrowingGrenade() && bot->pev->maxspeed>=200.0f;
+ return bot->IsAlive() && (IsManagingGrenade(bot)
+     || bot->IsOnLadder() || !(bot->pev->flags & FL_ONGROUND) || (bot->IsUsingGrenade() && !carryingSnowball) || bot->IsBusy() || bot->IsBlind() || bot->IsEscapingFromBomb()
+     || bot->IsCarryingBomb() || bot->m_bIsVIP || bot->IsEnemyVisible()
+     || bot->GetTimeSinceAttacked() < 2 || (!carryingSnowball && (bot->pev->button & IN_ATTACK))
+     || bot->GetRecognizedEnemy());
+}
+
 bool PauseForTyping(CCSBot *bot)
 {
- if (!Enabled() || !bot || !bot->IsAlive() || Completed() || IsManagingGrenade(bot)
-     || bot->IsOnLadder() || !(bot->pev->flags & FL_ONGROUND) || bot->IsUsingGrenade() || bot->IsBusy() || bot->IsBlind() || bot->IsEscapingFromBomb()
-     || bot->IsCarryingBomb() || bot->m_bIsVIP || bot->IsEnemyVisible()
-     || bot->GetTimeSinceAttacked() < 2 || (bot->pev->button & IN_ATTACK)
-     || bot->GetRecognizedEnemy()) return false;
+ if (!Enabled() || !bot || !bot->IsAlive() || Completed()) return false;
  auto &reply = State(bot).reply;
- if (!reply.active || gpGlobals->time < reply.typingStart || gpGlobals->time >= reply.due) return false;
+ if (!reply.active || gpGlobals->time < reply.typingStart || gpGlobals->time >= reply.due || TypingInterrupted(bot)) return false;
  auto *human = Player(reply.listenerSlot);
  if (!CompetitiveBotPolicy::DeliveryCurrent(gpGlobals->time, reply.issued, reply.deadline,
     reply.round, roundSerial, reply.speaker, Identity(bot), reply.listener, Identity(human))) return false;
@@ -1364,6 +1395,7 @@ void Reset()
 {
  for(auto &peek:coverPeeks) peek=CoverPeek {};
 	LoadCallouts();
+ casualBanter = CasualBanterSchedule {};
  pingComplaintNext=0;for(auto &time:nextSpreeChat)time=0;for(auto &team:placeNext)for(auto &time:team)time=0;
  for(auto &time:lastHumanChat)time=-100;
 	ResetGrenades(true);
@@ -1451,6 +1483,7 @@ void Frame()
 	if (change.greet) {
 		if (roundChat.value) { TeamLine(TERRORIST, "glhf"); TeamLine(CT, "glhf"); }
 	}
+ MaintainCasualBanter();
  UpdateSpreeReactions();
 	for (int i = 1; i <= gpGlobals->maxClients; ++i) {
 		auto *p = Player(i);
@@ -1466,7 +1499,15 @@ void Frame()
 		if (change.rebuy && bot->IsAlive()) bot->RestartCompetitiveBuying();
 		auto &reply = State(bot).reply;
 		if (IsSilentSubstitute(bot)) { reply.active = false; continue; }
-		if (!reply.active || gpGlobals->time < reply.due) continue;
+		if (!reply.active) continue;
+		const float elapsed = gpGlobals->time - reply.lastTypingCheck;
+		if (elapsed > 0) reply.lastTypingCheck = gpGlobals->time;
+		if (elapsed > 0 && !Completed() && TypingInterrupted(bot)) {
+			reply.due += elapsed;
+			if (gpGlobals->time > reply.deadline) reply.active = false;
+			continue;
+		}
+		if (gpGlobals->time < reply.due) continue;
 		auto *human = Player(reply.listenerSlot);
 		if (!CompetitiveBotPolicy::DeliveryCurrent(gpGlobals->time, reply.issued, reply.deadline,
 			reply.round, roundSerial, reply.speaker, Identity(bot), reply.listener, Identity(human))
@@ -1485,6 +1526,16 @@ void Frame()
 		reply.active = false;
 		SendSayMessage(bot, reply.teamOnly ? "say_team" : "say", reply.teamOnly,
 			reply.text, format, nullptr, !bot->IsAlive(), nullptr, false);
+  const bool asked = strchr(reply.text, '?') != nullptr;
+  if (reply.conversational || asked) {
+   for (int i=1; i<=gpGlobals->maxClients; ++i) {
+    auto *listener=Player(i);
+    if (!listener || (human && listener!=human) || !CanHear(bot,listener,reply.teamOnly)) continue;
+    auto &state=State(listener);
+    state.partner={bot->entindex(), Identity(bot), Identity(listener), roundSerial, reply.teamOnly, gpGlobals->time+(asked ? 120.0f : 20.0f)};
+    Q_strlcpy(state.question, asked ? reply.text : "");
+   }
+  }
   // Independent typing delays must not let an acknowledgement overtake its order.
   if(reply.planAnnouncement && bot->IsAlive() && plans[bot->m_iTeam].active
      && plans[bot->m_iTeam].leaderId==GETPLAYERUSERID(bot->edict())) {
@@ -1509,7 +1560,8 @@ void Chat(CBasePlayer *speaker, bool teamOnly, const char *text)
 		|| (speaker->pev->flags & (FL_FAKECLIENT | FL_PROXY))) return;
 	char phrase[97]; bool question = false;
 	if (!normalizeTeamPhrase(text, phrase, question)) return;
-	lastHumanChat[speaker->m_iTeam]=gpGlobals->time;
+	casualBanter.lastHuman=gpGlobals->time;
+ lastHumanChat[speaker->m_iTeam]=gpGlobals->time;
  if (HumanCaptainCall(speaker,text)) return;
 	auto &humanState = State(speaker);
  bool tagalog=Word(phrase,"ka") || Word(phrase,"ikaw") || Word(phrase,"ba") || Word(phrase,"ano");
@@ -1571,8 +1623,14 @@ void Chat(CBasePlayer *speaker, bool teamOnly, const char *text)
  if (matches > 1) return;
  bool identity=(Word(phrase,"bot") || Word(phrase,"bots") || Word(phrase,"human") || Word(phrase,"ai") || Word(phrase,"tao"))
   && (Word(phrase,"you") || Word(phrase,"ka") || Word(phrase,"ikaw")) && (question || Word(phrase,"are") || tagalog);
- if(!selected && humanState.partnerUntil>gpGlobals->time && Q_strlen(phrase)<=60) {
-  auto *p=Player(humanState.partnerSlot);if(p && p->IsBot() && GETPLAYERUSERID(p->edict())==humanState.partnerId && CanHear(p,speaker,teamOnly))selected=static_cast<CCSBot *>(p);
+ bool answering=false;
+ if (!selected || selected->entindex()==humanState.partner.slot) {
+  auto *partner=Player(humanState.partner.slot);
+  if (partner && partner->IsBot() && humanState.partner.Current(gpGlobals->time,roundSerial,teamOnly,Identity(partner),Identity(speaker))
+      && CanHear(partner,speaker,teamOnly)) {
+   selected=static_cast<CCSBot *>(partner);
+   answering=humanState.question[0]!=0;
+  }
  }
 	bool greeting = Word(phrase, "hello") || Word(phrase, "hi") || Word(phrase, "hey") || Word(phrase, "yo");
 	if (!selected && (identity || greeting || question || Word(phrase, "bot") || Word(phrase, "bots"))) {
@@ -1581,9 +1639,21 @@ void Chat(CBasePlayer *speaker, bool teamOnly, const char *text)
 			if (p && p->IsBot() && CanHear(p, speaker, teamOnly)) { selected = static_cast<CCSBot *>(p); break; }
 		}
 	}
-	if (selected && Queue(selected, speaker, teamOnly, identity ? (tagalog?"oo, bot ako":"yes i'm a bot") : greeting ? (tagalog?"uy, kamusta":"hey") : (tagalog?"nandito ako":"i'm here"))) {
-		if (!identity) AskAi(selected, speaker, teamOnly, text);
-  humanState.partnerSlot=selected->entindex();humanState.partnerId=GETPLAYERUSERID(selected->edict());humanState.partnerUntil=gpGlobals->time+20;
+	const char *line = tagalog ? "nandito ako" : "i'm here";
+ if (identity) line = tagalog ? "oo, bot ako" : "yes i'm a bot";
+ else if (greeting) line = tagalog ? "uy, kamusta" : "hey";
+ else if (answering) {
+  line = tagalog ? "sige" : "gotcha";
+  if (!Q_strcmp(humanState.question,"what map do you usually play?"))
+   line = Word(phrase,"dust") ? "dust is a classic" : "nice map pick";
+ }
+ if (selected && Queue(selected, speaker, teamOnly, line, false, answering)) {
+		if (!identity) {
+   char turn[97];
+   if (answering) Q_snprintf(turn,sizeof(turn),"Q: %.40s A: %s",humanState.question,text);
+   AskAi(selected,speaker,teamOnly,answering ? turn : text);
+  }
+  State(selected).reply.conversational=true;
 		humanState.nextOrder = gpGlobals->time + 2.0f;
 	}
 }

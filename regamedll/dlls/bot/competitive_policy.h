@@ -55,6 +55,19 @@ inline bool SameRecipient(const Recipient &before, const Recipient &now)
 		&& before.team == now.team && before.alive == now.alive;
 }
 
+struct ChatPartner {
+ int slot = 0;
+ Recipient bot, human;
+ unsigned round = 0;
+ bool teamOnly = false;
+ float expires = 0;
+ bool Current(float now, unsigned currentRound, bool channel, const Recipient &speaker, const Recipient &listener) const
+ {
+  return now < expires && currentRound == round && channel == teamOnly
+   && SameRecipient(bot, speaker) && SameRecipient(human, listener);
+ }
+};
+
 inline bool DeliveryCurrent(float now, float issued, float deadline, unsigned round,
 	unsigned currentRound, const Recipient &speaker, const Recipient &currentSpeaker,
 	const Recipient &listener, const Recipient &currentListener)
@@ -71,9 +84,9 @@ inline bool ActionsAllowed(bool enabled, bool completed, bool ffa,
 }
 inline float ReplyDelay(unsigned textBytes, float jitter)
 {
- const unsigned length = textBytes > 60 ? 60 : textBytes;
+ const unsigned length = textBytes > 90 ? 90 : textBytes;
  const float variation = jitter < 0 ? 0 : jitter > 0.65f ? 0.65f : jitter;
- return 1.3f + length * 0.018f + variation;
+ return 0.5f + length * 0.13f + variation;
 }
 
 struct Sighting {

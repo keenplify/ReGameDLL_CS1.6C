@@ -68,8 +68,9 @@ methods were added. Linux and MSVC project source lists include the extension.
   teammates, objectives, pressure, native throw physics, walls, ceilings and liquids.
   Native aim, pin pull and release remain engine-owned. This is a conservative
   trajectory preview, not learned map lineups or full YaPB utility parity.
-- Replies take roughly 1.5–3 seconds. A safe bot pauses movement during the final
-  typing interval; combat, objectives, blindness, ladders and falling override it.
+- Bot replies allow about 130 ms per byte of final text plus a short reaction delay.
+  Living bots stop movement while typing and suspend typing for combat and objectives.
+  Delivered questions accept unnamed answers on the same channel for up to two minutes.
 - Actual teammate flash/damage events queue named, throttled team complaints.
   Names bind to the actual actor and are invalidated on slot/team/life changes.
 - Cache templates bind `{{s}}` (subject), `{{p}}` (speaker), `{{b}}` (responding bot).

@@ -1,4 +1,5 @@
 #include "precompiled.h"
+#include "bot/cs_bot_competitive.h"
 
 // Nasty Hack.  See client.cpp/ClientCommand()
 const char *BotArgs[4] = {};
@@ -285,6 +286,11 @@ void CBot::ExecuteCommand()
 		botCmd.buttons     = m_buttonFlags;
 		botCmd.impulse     = 0;
 		botCmd.viewangles  = pev->v_angle;
+	}
+
+	if (CompetitiveBots::PauseForTyping(static_cast<CCSBot *>(this))) {
+		botCmd.forwardmove = botCmd.sidemove = botCmd.upmove = 0;
+		botCmd.buttons &= ~(IN_FORWARD | IN_BACK | IN_MOVELEFT | IN_MOVERIGHT | IN_JUMP);
 	}
 
 	// player model is "munged"
