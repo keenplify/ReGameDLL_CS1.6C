@@ -1297,7 +1297,7 @@ bool CCSBot::IsFriendInTheWay(const Vector *goalPos) const
 		// Only the yielding bot waits in a head-on encounter. Native waiting
 		// must not make the player with right of way stop as well.
 		if (CompetitiveBots::Enabled() && IsHeadOnFriend(pPlayer,goalPos)
-		    && !CompetitiveTraffic::Yields(TrafficPriority(const_cast<CCSBot *>(this)),TrafficPriority(pPlayer),entindex(),i))
+		    && !CompetitiveTraffic::Yields(TrafficPriority(const_cast<CCSBot *>(this)),TrafficPriority(pPlayer),ENTINDEX(pev->pContainingEntity),i))
 			continue;
 
 		// compute vector from us to our friend

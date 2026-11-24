@@ -42,9 +42,9 @@ bool Safe(CCSBot *bot,const Vector &point,int weapon) {
   auto *p=Opponent(i);
   if(p && p!=bot && p->IsAlive() && p->m_iTeam==bot->m_iTeam) {
    // Account for teammates already moving toward the landing zone.
-   Vector near=p->pev->origin+p->pev->velocity*.4f;
+   Vector predictedPosition=p->pev->origin+p->pev->velocity*.4f;
    if(!SafeDistance(V(point),V(p->pev->origin),Type(weapon))
-      || !SafeDistance(V(point),V(near),Type(weapon))) return false;
+      || !SafeDistance(V(point),V(predictedPosition),Type(weapon))) return false;
   }
  }
  return true;

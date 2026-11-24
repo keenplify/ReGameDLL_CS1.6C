@@ -1323,7 +1323,7 @@ bool CCSBot::IsNoticable(const CBasePlayer *pPlayer, unsigned char visibleParts)
 	float noticeChance = dispositionChance * coverRatio/100.0f;
 
 	// scale by skill level
-	noticeChance *= (0.5f + 0.5f * CompetitiveBots::ExecutionSkill(this));
+	noticeChance *= (0.5f + 0.5f * CompetitiveBots::ExecutionSkill(const_cast<CCSBot *>(this)));
 
 	// if we are alert, our chance of noticing is much higher
 	//if (IsAlert())
