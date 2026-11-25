@@ -834,6 +834,12 @@ bool CanExchange(CCSBot *bot) {
      && !bot->IsEnemyVisible() && !bot->IsAttacking() && bot->GetTimeSinceAttacked() >= 3;
 }
 bool StartExchange(CCSBot *speaker) {
+ CBasePlayer *guest = nullptr;
+ int guests = 0;
+ for (int i=1; i<=gpGlobals->maxClients; ++i) {
+  auto *p=Player(i);
+  if (p && !p->IsBot() && CanHear(speaker,p,false) && RANDOM_LONG(1,++guests)==1) guest=p;
+ }
  CCSBot *partner = nullptr;
  int candidates = 0;
  for (int i=1; i<=gpGlobals->maxClients; ++i) {
@@ -843,11 +849,20 @@ bool StartExchange(CCSBot *speaker) {
   if (!CanExchange(bot) || State(bot).reply.active || gpGlobals->time<State(bot).nextChat) continue;
   if (RANDOM_LONG(1,++candidates)==1) partner=bot;
  }
- if (!partner) return false;
+ if (!partner && !guest) return false;
  int topic=-1, available=0;
  for (int i=0; i<int(ARRAYSIZE(winterExchanges)); ++i)
   if (!usedExchange[i] && RANDOM_LONG(1,++available)==1) topic=i;
- if (topic<0 || !Speak(speaker,nullptr,false,winterExchanges[topic].opening,false)) return false;
+ if (topic<0) return false;
+ if (guest && (!partner || RANDOM_LONG(0,2)==0)) {
+  char name[64],line[91]; CleanName(guest,name);
+  Q_snprintf(line,sizeof(line),"%.24s, %s",name,winterExchanges[topic].opening);
+  if (!Speak(speaker,guest,false,line,false)) return false;
+  State(speaker).reply.conversational=true;
+  usedExchange[topic]=true;
+  return true;
+ }
+ if (!Speak(speaker,nullptr,false,winterExchanges[topic].opening,false)) return false;
  usedExchange[topic]=true;
  auto &reply=State(speaker).reply;
  reply.exchange=topic;
@@ -1651,13 +1666,13 @@ void Frame()
 			reply.text, format, nullptr, !bot->IsAlive(), nullptr, false);
   if (reply.exchange>=0) ContinueExchange(bot,reply);
   const bool asked = strchr(reply.text, '?') != nullptr;
-  if (reply.conversational || asked) {
+  if (reply.conversational || asked || reply.exchange>=0) {
    for (int i=1; i<=gpGlobals->maxClients; ++i) {
     auto *listener=Player(i);
     if (!listener || (human && listener!=human) || !CanHear(bot,listener,reply.teamOnly)) continue;
     auto &state=State(listener);
     state.partner={bot->entindex(), Identity(bot), Identity(listener), roundSerial, reply.teamOnly, gpGlobals->time+(asked ? 120.0f : 20.0f)};
-    Q_strlcpy(state.question, asked ? reply.text : "");
+    Q_strlcpy(state.question, (asked || reply.exchange>=0) ? reply.text : "");
    }
   }
   // Independent typing delays must not let an acknowledgement overtake its order.
@@ -1756,13 +1771,30 @@ void Chat(CBasePlayer *speaker, bool teamOnly, const char *text)
    answering=humanState.question[0]!=0;
   }
  }
-	bool greeting = Word(phrase, "hello") || Word(phrase, "hi") || Word(phrase, "hey") || Word(phrase, "yo");
-	if (!selected && (identity || greeting || question || Word(phrase, "bot") || Word(phrase, "bots"))) {
-		for (int i = 1; i <= gpGlobals->maxClients; ++i) {
-			auto *p = Player(i);
-			if (p && p->IsBot() && CanHear(p, speaker, teamOnly)) { selected = static_cast<CCSBot *>(p); break; }
-		}
-	}
+ bool greeting = Word(phrase,"hello") || Word(phrase,"hi") || Word(phrase,"hey") || Word(phrase,"yo");
+ const bool room = !teamOnly && Ffa() && Flag("sw_toggle") && !Completed();
+ // Prefer a participant in the audible exchange. A queued tactical or human
+ // reply always keeps its slot. An explicit name always keeps its recipient.
+ if (!matches && selected && (IsSilentSubstitute(selected) || SimulatedAway(selected)
+     || (State(selected).reply.active && State(selected).reply.exchange<0))) {
+  selected=nullptr;
+  answering=false;
+ }
+ if (!selected && (room || identity || greeting || question || Word(phrase,"bot") || Word(phrase,"bots"))) {
+  int priority=0, count=0;
+  for (int i=1;i<=gpGlobals->maxClients;++i) {
+   auto *p=Player(i);
+   if (!p || !p->IsBot() || !CanHear(p,speaker,teamOnly)) continue;
+   auto *b=static_cast<CCSBot *>(p);
+   if (IsSilentSubstitute(b) || SimulatedAway(b)) continue;
+   const auto &pending=State(b).reply;
+   if (pending.active && !(room && pending.exchange>=0 && pending.exchangeTurn>0)) continue;
+   const int rank=pending.active ? 2 : 1;
+   if (rank<priority) continue;
+   if (rank>priority) { priority=rank; count=0; }
+   if (RANDOM_LONG(1,++count)==1) selected=b;
+  }
+ }
 	const char *line = tagalog ? "nandito ako" : "i'm here";
  if (identity) line = tagalog ? "oo, bot ako" : "yes i'm a bot";
  else if (greeting) line = tagalog ? "uy, kamusta" : "hey";
@@ -1771,7 +1803,37 @@ void Chat(CBasePlayer *speaker, bool teamOnly, const char *text)
   if (!Q_strcmp(humanState.question,"what map do you usually play?"))
    line = Word(phrase,"dust") ? "dust is a classic" : "nice map pick";
  }
- if (selected && Queue(selected, speaker, teamOnly, line, false, answering)) {
+ if (room && selected && !identity && !greeting) {
+  const char *style=ChatStyle(selected);
+  if (Word(phrase,"gg")) line="gg";
+  else if (Word(phrase,"lol") || Word(phrase,"haha")) line="lmao";
+  else if (Word(phrase,"rink")) line="rink gets your vote";
+  else if (Word(phrase,"canal")) line="canal it is";
+  else {
+   static unsigned turn=0;
+   const char *responses[][3]={{"fair","yeah","gotcha"},{"fair point","go on","i hear you"},
+      {"i get you","that's fair","yeah, i see it"},{"you reckon?","sure lol","if you say so"},
+      {"oh yeah?","go on, i'm listening","what makes you say that?"},{"gotcha","fair enough","yeah i hear you"}};
+   int row=!Q_strcmp(style,"quiet")?0:!Q_strcmp(style,"dry")?1:!Q_strcmp(style,"sweet")?2:
+           !Q_strcmp(style,"rude")?3:!Q_strcmp(style,"talkative")?4:5;
+   line=responses[row][turn++%3];
+  }
+ }
+ if (room && selected && textChat.value && !IsSilentSubstitute(selected) && !SimulatedAway(selected)) {
+  auto &pending=State(selected).reply;
+  if (pending.active && pending.exchange>=0) pending.active=false;
+ }
+ if (selected && Queue(selected, speaker, teamOnly, line, false, answering || room)) {
+  if (room) {
+   ScheduleTyping(State(selected).reply,gpGlobals->time+RANDOM_FLOAT(1.5f,4.0f));
+   for (int i=1;i<=gpGlobals->maxClients;++i) {
+    auto *p=Player(i);
+    if (!p || !p->IsBot() || !CanHear(p,speaker,false)) continue;
+    auto &pending=State(p).reply;
+    if (pending.active && pending.exchange>=0 && pending.subjectSlot==selected->entindex()
+        && CompetitiveBotPolicy::SameRecipient(pending.subject,Identity(selected))) pending.active=false;
+   }
+  }
 		if (!identity) {
    char turn[97];
    if (answering) Q_snprintf(turn,sizeof(turn),"Q: %.40s A: %s",humanState.question,text);
