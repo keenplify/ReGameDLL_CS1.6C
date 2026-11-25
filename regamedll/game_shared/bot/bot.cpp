@@ -305,6 +305,8 @@ void CBot::ExecuteCommand()
 		if (!typing) static_cast<CCSBot *>(this)->ApplyBhopMovement(stepCmd,stepMSec*.001f);
 		BhopRace::Command(static_cast<CCSBot *>(this),stepCmd);
 		if (typing) {
+			// A grounded typist has stopped walking, including momentum from the previous command.
+			pev->velocity.x = pev->velocity.y = 0.0f;
 			stepCmd.forwardmove = stepCmd.sidemove = stepCmd.upmove = 0;
 			stepCmd.buttons &= ~(IN_FORWARD | IN_BACK | IN_MOVELEFT | IN_MOVERIGHT | IN_JUMP);
 		}

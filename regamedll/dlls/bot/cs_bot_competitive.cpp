@@ -58,6 +58,7 @@ struct Reply {
 	bool teamOnly = false;
 	bool tactical = false;
  bool conversational = false;
+ int exchange = -1, exchangeTurn = 0;
 	bool planAnnouncement = false;
  unsigned planRevision = 0;
  bool captainReply = false;
@@ -779,6 +780,112 @@ bool Banter(CCSBot *bot,CBasePlayer *subject,bool teamOnly,const char *line) {
  AskAi(bot,nullptr,teamOnly,line,"banter",subject);
  return true;
 }
+// Each row is one conversation. The response follows the second speaker's roster style.
+// Openers stay neutral; quiet bots can answer once, talkative pairs can go four turns.
+struct WinterExchange {
+ const char *opening, *normal, *quiet, *dry, *sweet, *rude, *talkative, *followup, *closing;
+};
+const WinterExchange winterExchanges[] = {
+ {"rink or canal?", "canal for me", "rink", "whichever has railings", "both sound fun", "rink. easy choice", "canal, under the bridge", "i'd play either", "first to ten?"},
+ {"did that bounce twice?", "off the door first", "twice", "door got an assist", "nice bank shot", "pure luck lol", "door then the stairs", "meant the first one", "keep the replay"},
+ {"mittens or gloves?", "gloves, better grip", "gloves", "two oven mitts", "warm mittens please", "mittens are cursed", "gloves with hand warmers", "my fingers are toast", "trade you a warmer"},
+ {"who packed these?", "probably the spawn guy", "no clue", "snowball department", "someone with cold hands", "whoever did owes me", "found a whole pile outside", "this one's all powder", "save it for close range"},
+ {"lob over the rail?", "give it some height", "send it", "gravity has opinions", "you've got this", "just throw already", "aim above the far post", "ok that's pretty high", "watch the landing"},
+ {"hot cocoa after?", "extra chocolate", "sure", "in this economy?", "i'll bring marshmallows", "better be hot", "yeah, big mug for me", "taking orders now", "put me down for two"},
+ {"you hear that crunch?", "boots on fresh snow", "footsteps", "very stealthy snow", "love that sound", "yeah from miles away", "like walking on cornflakes", "there it goes again", "right by the steps"},
+ {"best snow fort spot?", "behind those crates", "back corner", "indoors, ideally", "room for two here", "anywhere but mid", "stack it by the doorway", "needs a lookout", "i'll take first shift"},
+ {"anyone keeping score?", "lost count ages ago", "nope", "snow is winning", "we're doing alright", "you sure you wanna know?", "counting bank shots only", "one more round then", "deal, last one"},
+ {"how's my aim?", "bit to the left", "close", "wall looks terrified", "getting warmer", "poor wall", "try leading a little", "adjusting two pixels", "precision snowballing"},
+ {"fresh tracks outside?", "straight down the lane", "two sets", "snow kept receipts", "tiny ones by spawn", "stop tracking me lol", "follow the zigzag ones", "ends at the corner", "mystery solved"},
+ {"snowman needs a name", "call him frank", "bob", "unpaid goalie", "little frosty", "target practice", "captain snowboots obviously", "he needs a hat too", "dibs on the scarf"},
+ {"lost my left glove", "check spawn", "by the steps", "it needed space", "i'll help look", "how'd you lose one?", "check inside your other glove", "found it in my pocket", "classic"},
+ {"anyone good at sledding?", "steering's the hard part", "kinda", "trees always win", "i'll push!", "you'd hit the fence", "feet first, lean back", "i call front seat", "you steer then"},
+ {"what's that whistle?", "wind through the fence", "just wind", "map's giving feedback", "sounds kinda nice", "your aim complaining", "heard it by the vent too", "same pitch again", "same note too"},
+ {"my boots squeak", "mine do too", "heard that", "stealth upgrade", "little mouse boots!", "whole map knows", "left one's way louder", "only when i turn", "try turning right"},
+ {"name my trick shot", "the snow hook", "the curl", "wide by design", "the little comet", "call it a miss", "the reverse mailbox", "writing that down", "royalties please"},
+ {"ever catch snowflakes?", "on my sleeve", "sometimes", "too much paperwork", "the big ones!", "you have free time huh", "black gloves work best", "this one's a star", "quick before it melts"},
+ {"my scarf keeps slipping", "double knot it", "tuck it in", "scarf wants out", "i'll hold the end", "skill issue scarf edition", "loop it under your collar", "there we go", "much better"},
+ {"left or right stairs?", "take the left", "right", "whichever goes up", "i'll follow you", "pick one already", "right then cut across", "taking the scenic route", "meet you up top"},
+ {"found a carrot", "snowman nose", "keep it", "loot table's wild", "give him a nose", "that's your loadout?", "save it for our snowman", "it's kinda crooked", "adds character"},
+ {"how deep's the snow?", "ankle deep", "boots deep", "one missing shoe", "enough for snow angels", "jump in and check", "deeper by the fence", "testing with one foot", "keep the other dry"},
+ {"ever play with a trackball?", "once at school", "once", "thumb day at the gym", "my dad had one", "that's cursed hardware", "had to clean the rollers", "mine collected crumbs", "free snack i guess"},
+ {"someone stole my hat", "check the snowman", "look behind you", "hat changed teams", "borrow my spare", "even your hat left", "saw one on the railing", "that's my hat alright", "case closed"},
+ {"good spot for an igloo?", "flat ground here", "by spawn", "planning permit first", "leave a little window", "build away from me", "behind the tall snowbank", "needs a tiny door", "duck on entry"},
+ {"my chair keeps rolling", "lock the wheels", "rug helps", "new movement tech", "careful there", "brake with your feet", "mine rolls on every flick", "moving my mouse less", "chair nerf incoming"},
+ {"pick a snow day song", "something slow", "lofi", "freezer hum", "the sleigh bell one", "anything but bells", "old menu music on loop", "i'll hum it", "wrong key already"},
+ {"who drew that penguin?", "looks like chalk", "was me", "local wildlife", "it's adorable", "looks like a potato", "someone gave it eyebrows", "adding little feet", "now it can waddle"},
+ {"one bounce challenge?", "off the floor?", "i'm in", "the floor accepts", "that sounds fun", "bet you miss", "corner banks count too?", "floor shots count", "house rules then"},
+ {"found a frozen puddle", "watch your step", "slippery", "free skating lesson", "hold my sleeve", "don't faceplant", "slide past it sideways", "nearly stuck the landing", "judges give it six"},
+ {"you keep old demos?", "a few classics", "some", "on a fossil drive", "saved our first win", "delete your whiffs", "got a folder called final_final", "mine are all untitled", "sort by embarrassment"},
+ {"what's in the thermos?", "black tea", "coffee", "room temperature regret", "apple cider", "better not be soup", "peppermint hot chocolate", "smells like cinnamon", "secret ingredient"},
+ {"what's a snowball worth?", "two pinecones", "a button", "market's frozen", "first one's free", "yours? nothing", "depends on the packing", "i've got pocket lint", "deal of the day"},
+ {"best winter snack?", "warm pretzel", "cookies", "unfrozen bread", "fresh gingerbread", "anything but raisins", "toast with way too much butter", "break after this?", "saving you a seat"},
+ {"my mousepad's sliding", "put cloth under it", "tape it", "second ice rink", "got spare tape here", "your desk has recoil", "mine did that on glass", "fixed it with a book", "hardcover buff"},
+ {"found one tiny ski", "check for another", "just one?", "mouse commute", "for a little penguin!", "that's a popsicle stick", "build a little ski lift", "needs a matching pole", "toothpick should work"}
+};
+bool usedExchange[ARRAYSIZE(winterExchanges)] = {};
+
+const char *ChatStyle(CCSBot *bot) {
+ const char *style = g_engfuncs.pfnInfoKeyValue(GET_INFO_BUFFER(bot->edict()), "_16c_style");
+ return style ? style : "";
+}
+bool CanExchange(CCSBot *bot) {
+ return bot->IsAlive() && CombatTeam(bot) && !IsSilentSubstitute(bot) && !SimulatedAway(bot)
+     && !bot->IsEnemyVisible() && !bot->IsAttacking() && bot->GetTimeSinceAttacked() >= 3;
+}
+bool StartExchange(CCSBot *speaker) {
+ CCSBot *partner = nullptr;
+ int candidates = 0;
+ for (int i=1; i<=gpGlobals->maxClients; ++i) {
+  auto *player = Player(i);
+  if (!player || player==speaker || !player->IsBot()) continue;
+  auto *bot = static_cast<CCSBot *>(player);
+  if (!CanExchange(bot) || State(bot).reply.active || gpGlobals->time<State(bot).nextChat) continue;
+  if (RANDOM_LONG(1,++candidates)==1) partner=bot;
+ }
+ if (!partner) return false;
+ int topic=-1, available=0;
+ for (int i=0; i<int(ARRAYSIZE(winterExchanges)); ++i)
+  if (!usedExchange[i] && RANDOM_LONG(1,++available)==1) topic=i;
+ if (topic<0 || !Speak(speaker,nullptr,false,winterExchanges[topic].opening,false)) return false;
+ usedExchange[topic]=true;
+ auto &reply=State(speaker).reply;
+ reply.exchange=topic;
+ reply.subjectSlot=partner->entindex();
+ reply.subject=Identity(partner);
+ return true;
+}
+void ContinueExchange(CCSBot *speaker, const Reply &sent) {
+ if (sent.exchange<0 || sent.exchangeTurn>=3 || Completed() || !roundChat.value || !textChat.value) return;
+ auto *player=Player(sent.subjectSlot);
+ if (!player || !player->IsBot() || !CompetitiveBotPolicy::SameRecipient(sent.subject,Identity(player))) return;
+ auto *partner=static_cast<CCSBot *>(player);
+ if (!CanExchange(partner) || !CanExchange(speaker) || TheCSBots()->IsBombPlanted()) return;
+ const char *style=ChatStyle(partner);
+ const auto &row=winterExchanges[sent.exchange];
+ const char *line=row.followup;
+ if (sent.exchangeTurn==0) {
+  line=row.normal;
+  if (!Q_strcmp(style,"quiet")) line=row.quiet;
+  else if (!Q_strcmp(style,"dry")) line=row.dry;
+  else if (!Q_strcmp(style,"sweet")) line=row.sweet;
+  else if (!Q_strcmp(style,"rude")) line=row.rude;
+  else if (!Q_strcmp(style,"talkative")) line=row.talkative;
+ } else {
+  if (!Q_strcmp(ChatStyle(speaker),"quiet") || !Q_strcmp(style,"quiet")) return;
+  if (sent.exchangeTurn==2) {
+   if (Q_strcmp(style,"talkative") && Q_strcmp(ChatStyle(speaker),"talkative")) return;
+   line=row.closing;
+  }
+ }
+ if (!Queue(partner,nullptr,false,line,false,true)) return;
+ auto &reply=State(partner).reply;
+ reply.exchange=sent.exchange;
+ reply.exchangeTurn=sent.exchangeTurn+1;
+ reply.subjectSlot=speaker->entindex();
+ reply.subject=Identity(speaker);
+ ScheduleTyping(reply,gpGlobals->time+RANDOM_FLOAT(0.8f,1.6f));
+}
 void MaintainCasualBanter() {
  if(!textChat.value || !roundChat.value || Completed() || !casualBanter.due(gpGlobals->time))return;
  bool humanPresent=false;
@@ -791,6 +898,10 @@ void MaintainCasualBanter() {
      || bot->GetTimeSinceAttacked()<3 || State(bot).reply.active || gpGlobals->time<State(bot).nextChat)continue;
   // Do not ask a model to escalate the tone. Normal Queue handles typing and mute/dead rules.
   const bool winter = CVAR_GET_FLOAT("sw_toggle") == 1;
+  static char exchangeMap[64]={};
+  const char *map=STRING(gpGlobals->mapname);
+  if (Q_strcmp(exchangeMap,map)) { Q_strlcpy(exchangeMap,map); for(auto &used:usedExchange) used=false; }
+  if (winter && StartExchange(bot)) { casualBanter.sent(gpGlobals->time); break; }
   // Step through the fallback pool without repeating at each map start.
   static unsigned fallbackIndex = unsigned(RANDOM_LONG(0, 65535));
   if (Speak(bot, nullptr, false, casualBanterLine(fallbackIndex, winter), false)) {
@@ -1525,6 +1636,7 @@ void Frame()
 			|| (reply.subjectSlot && !CompetitiveBotPolicy::SameRecipient(reply.subject, Identity(Player(reply.subjectSlot))))
             || (reply.planAnnouncement && (!bot->IsAlive() || !openingPlans[bot->m_iTeam].deliver(gpGlobals->time-captainRoundStarted)
                 || reply.planRevision!=plans[bot->m_iTeam].revision || plans[bot->m_iTeam].leaderId!=GETPLAYERUSERID(bot->edict())))
+            || (reply.exchange>=0 && (Completed() || !roundChat.value || !textChat.value || !CanExchange(bot)))
             || (reply.aceReply && !IsRoundAce(Player(reply.subjectSlot)))
             || (reply.captainReply && !RoundTacticsAllowed())
             || (reply.tactical && Completed())) { reply.active = false; continue; }
@@ -1536,6 +1648,7 @@ void Frame()
 		reply.active = false;
 		SendSayMessage(bot, reply.teamOnly ? "say_team" : "say", reply.teamOnly,
 			reply.text, format, nullptr, !bot->IsAlive(), nullptr, false);
+  if (reply.exchange>=0) ContinueExchange(bot,reply);
   const bool asked = strchr(reply.text, '?') != nullptr;
   if (reply.conversational || asked) {
    for (int i=1; i<=gpGlobals->maxClients; ++i) {
