@@ -884,7 +884,8 @@ void ContinueExchange(CCSBot *speaker, const Reply &sent) {
  reply.exchangeTurn=sent.exchangeTurn+1;
  reply.subjectSlot=speaker->entindex();
  reply.subject=Identity(speaker);
- ScheduleTyping(reply,gpGlobals->time+RANDOM_FLOAT(0.8f,1.6f));
+ // Read the previous line before stopping to type a response.
+ ScheduleTyping(reply,gpGlobals->time+RANDOM_FLOAT(2.5f,6.5f));
 }
 void MaintainCasualBanter() {
  if(!textChat.value || !roundChat.value || Completed() || !casualBanter.due(gpGlobals->time))return;
