@@ -790,7 +790,14 @@ void MaintainCasualBanter() {
   if(!InitiatesChat(bot) || SimulatedAway(bot) || bot->IsEnemyVisible() || bot->IsAttacking()
      || bot->GetTimeSinceAttacked()<3 || State(bot).reply.active || gpGlobals->time<State(bot).nextChat)continue;
   // Do not ask a model to escalate the tone. Normal Queue handles typing and mute/dead rules.
-  if(Speak(bot,nullptr,false,casualBanterLine(casualBanter.sequence, CVAR_GET_FLOAT("sw_toggle")==1),false))casualBanter.sent(gpGlobals->time);
+  const bool winter = CVAR_GET_FLOAT("sw_toggle") == 1;
+  // Step through the fallback pool without repeating at each map start.
+  static unsigned fallbackIndex = unsigned(RANDOM_LONG(0, 65535));
+  if (Speak(bot, nullptr, false, casualBanterLine(fallbackIndex, winter), false)) {
+   fallbackIndex += 17;
+   casualBanter.sent(gpGlobals->time);
+   AskAi(bot, nullptr, false, winter ? "winter" : "classic", "passive");
+  }
   break;
  }
 }

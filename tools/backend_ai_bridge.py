@@ -17,17 +17,18 @@ import time
 from urllib.parse import urlparse
 from urllib.error import HTTPError
 import reply_templates as templates
+from passive_banter import PassiveBanter
 
 
 def parse_request(raw):
     if len(raw) > 1024 or b"\0" in raw:
         raise ValueError("invalid request size")
-    fields = raw.decode("utf-8").rstrip("\n").split("\t")
+    fields = raw.decode("utf-8").rstrip("\r\n").split("\t")
     if len(fields) not in (11, 15, 16):
         raise ValueError("invalid field count")
     version, token, bot, player, channel, mode, team, map_name, hp, money, text = fields[:11]
     kind, player_name, bot_name, subject_name = fields[11:15] if len(fields)>=15 else ("chat", "", "", "")
-    if kind not in ("chat", "event", "team_flash", "team_damage"):
+    if kind not in ("chat", "event", "team_flash", "team_damage", "passive"):
         raise ValueError("invalid event kind")
     if (version, len(fields)) not in (("1", 11), ("2", 15), ("3", 16)) or not re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{8}-[0-9]+", token):
         raise ValueError("invalid protocol/token")
@@ -292,6 +293,7 @@ def main():
     seen = None
     costs = CostGuard(queue, args.hourly_limit, args.daily_limit, args.min_interval)
     remote = RemoteCache()
+    passive = None
     conversations = Conversation(args.history_turns)
     last_error = None
     if not (args.hourly_limit or args.daily_limit or args.min_interval):
@@ -312,6 +314,14 @@ def main():
                 time.sleep(0.1)
                 continue
             seen = token
+            if event["kind"] == "passive":
+                if passive is None:
+                    passive = PassiveBanter()
+                line = passive.choose(event["text"] == "winter", remote)
+                validate_model_choice({"reply": line}, event)
+                if request.read_bytes() == raw and time.time() - request.stat().st_mtime <= 7:
+                    publish(queue, token, line)
+                continue
             apply_roster_style(queue, event)
             now = time.time()
             dialogue = conversations.dialogue(event,now)

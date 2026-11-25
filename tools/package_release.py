@@ -19,7 +19,7 @@ def package(build, destination):
     for path in (ROOT / "regamedll/extra/regamedll").rglob("*"):
         if path.is_file():
             files["cstrike/addons/regamedll/" + path.relative_to(ROOT / "regamedll/extra/regamedll").as_posix()] = path
-    for name in ("backend_ai_bridge.py", "standalone_ai_provider.py", "reply_templates.py", "run-ai.sh", "run-dedicated.sh", "export_cz_callouts.py"):
+    for name in ("backend_ai_bridge.py", "standalone_ai_provider.py", "reply_templates.py", "passive_banter.py", "passive_sync.py", "passive_banter.json", "run-ai.sh", "run-dedicated.sh", "export_cz_callouts.py"):
         files["cstrike/addons/regamedll/tools/" + name] = ROOT / "tools" / name
     for name in ("COMPETITIVE_BOTS.md", "YAPB_PORT_AUDIT.md", "LICENSE"):
         if (ROOT / name).is_file():
